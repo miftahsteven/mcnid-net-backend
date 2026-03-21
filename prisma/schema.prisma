@@ -1,0 +1,382 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id               String     @id @default(cuid())
+  name             String
+  username         String?    @unique
+  email            String     @unique
+  image            String?
+  passwordHash     String?
+  role             Role       @default(EDITOR)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  twoFactorEnabled Boolean    @default(false)
+  twoFactorSecret  String?
+  auditLogs        AuditLog[]
+  courses          Course[]   @relation("CourseAuthor")
+  posts            Post[]
+  videos           Video[]
+
+  @@map("users")
+}
+
+model Post {
+  id           String         @id @default(cuid())
+  title        String
+  slug         String         @unique
+  content      String
+  excerpt      String?
+  coverImage   String?
+  status       PostStatus     @default(DRAFT)
+  publishedAt  DateTime?
+  seoTitle     String?
+  seoDesc      String?
+  schemaJson   Json?
+  authorId     String
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  customAuthor String?
+  type         String         @default("news")
+  isHighlight  Boolean        @default(false)
+  viewCount    Int            @default(0)
+  categories   PostCategory[]
+  tags         PostTag[]
+  author       User           @relation(fields: [authorId], references: [id])
+
+  @@map("posts")
+}
+
+model Category {
+  id     String          @id @default(cuid())
+  name   String          @unique
+  slug   String          @unique
+  posts  PostCategory[]
+  videos VideoCategory[]
+
+  @@map("categories")
+}
+
+model PostCategory {
+  postId     String
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  post       Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@id([postId, categoryId])
+  @@map("post_categories")
+}
+
+model Tag {
+  id    String    @id @default(cuid())
+  name  String    @unique
+  posts PostTag[]
+
+  @@map("tags")
+}
+
+model PostTag {
+  postId String
+  tagId  String
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, tagId])
+  @@map("post_tags")
+}
+
+model Page {
+  id        String  @id @default(cuid())
+  slug      String  @unique
+  title     String
+  published Boolean @default(false)
+  blocks    Block[]
+
+  @@map("pages")
+}
+
+model Block {
+  id      String  @id @default(cuid())
+  type    String
+  order   Int
+  active  Boolean @default(true)
+  content Json
+  pageId  String
+  page    Page    @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@map("blocks")
+}
+
+model Media {
+  id            String   @id @default(cuid())
+  filename      String
+  url           String
+  type          String
+  size          Int
+  mimeType      String
+  alt           String?
+  createdAt     DateTime @default(now())
+  showInGallery Boolean  @default(false)
+
+  @@map("media")
+}
+
+model ChatLog {
+  id        String   @id @default(cuid())
+  sessionId String
+  question  String
+  answer    String
+  intent    String?
+  ipHash    String?
+  tokens    Int?
+  createdAt DateTime @default(now())
+
+  @@map("chat_logs")
+}
+
+model KnowledgeBase {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  source    String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("knowledge_base")
+}
+
+model Work {
+  id         String   @id @default(cuid())
+  title      String
+  type       WorkType
+  content    String?
+  fileUrl    String?
+  repoUrl    String?
+  doi        String?
+  publisher  String?
+  year       Int?
+  references String?
+  published  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("works")
+}
+
+model GalleryItem {
+  id        String          @id @default(cuid())
+  type      GalleryItemType
+  title     String?
+  url       String
+  order     Int             @default(0)
+  active    Boolean         @default(true)
+  createdAt DateTime        @default(now())
+
+  @@map("gallery_items")
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  userId    String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@map("audit_logs")
+}
+
+model Setting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+model Karya {
+  id           String        @id @default(cuid())
+  category     KaryaCategory
+  sumber       String        @default("cholilnafis.id")
+  title        String
+  shortcontent String?
+  fullcontent  String
+  fileUrl      String?
+  status       PostStatus    @default(DRAFT)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@map("karya")
+}
+
+model Video {
+  id          String          @id @default(cuid())
+  title       String
+  slug        String          @unique
+  description String?
+  sourceType  VideoSourceType @default(YOUTUBE)
+  videoUrl    String?
+  coverImage  String?
+  duration    String?
+  isHighlight Boolean         @default(false)
+  status      PostStatus      @default(DRAFT)
+  publishedAt DateTime?
+  authorId    String
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  viewCount   Int             @default(0)
+  categories  VideoCategory[]
+  author      User            @relation(fields: [authorId], references: [id])
+
+  @@map("videos")
+}
+
+model VideoCategory {
+  videoId    String
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  video      Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+
+  @@id([videoId, categoryId])
+  @@map("video_categories")
+}
+
+model Course {
+  id             String         @id @default(cuid())
+  title          String
+  slug           String         @unique
+  description    String?
+  coverImage     String?
+  category       String         @default("Umum")
+  level          String         @default("Pemula")
+  durationHours  Float?
+  price          Float          @default(0)
+  hasCertificate Boolean        @default(false)
+  status         CourseStatus   @default(DRAFT)
+  authorId       String
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  modules        CourseModule[]
+  author         User           @relation("CourseAuthor", fields: [authorId], references: [id])
+  enrollments    Enrollment[]
+
+  @@map("courses")
+}
+
+model CourseModule {
+  id        String   @id @default(cuid())
+  title     String
+  order     Int      @default(0)
+  courseId  String
+  createdAt DateTime @default(now())
+  course    Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  lessons   Lesson[]
+
+  @@map("course_modules")
+}
+
+model Lesson {
+  id          String           @id @default(cuid())
+  title       String
+  type        LessonType       @default(VIDEO)
+  content     String?
+  videoUrl    String?
+  fileUrl     String?
+  durationMin Int?
+  order       Int              @default(0)
+  isFree      Boolean          @default(false)
+  moduleId    String
+  createdAt   DateTime         @default(now())
+  progress    LessonProgress[]
+  module      CourseModule     @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@map("lessons")
+}
+
+model Enrollment {
+  id            String   @id @default(cuid())
+  userId        String
+  courseId      String
+  paymentStatus String   @default("free")
+  enrolledAt    DateTime @default(now())
+  course        Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, courseId])
+  @@map("enrollments")
+}
+
+model LessonProgress {
+  id          String    @id @default(cuid())
+  userId      String
+  lessonId    String
+  completed   Boolean   @default(false)
+  watchedSec  Int       @default(0)
+  completedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+  lesson      Lesson    @relation(fields: [lessonId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+  @@map("lesson_progress")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  EDITOR
+  MODERATOR
+  PENGAJAR
+}
+
+enum PostStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+  REVIEW
+}
+
+enum WorkType {
+  BUKU
+  JURNAL
+  ARTIKEL
+  KARYA_DIGITAL
+}
+
+enum GalleryItemType {
+  IMAGE
+  VIDEO_YOUTUBE
+}
+
+enum KaryaCategory {
+  ArtikelKoran
+  KaryaBuku
+  Khotbah
+  Artikel
+  Materi
+}
+
+enum VideoSourceType {
+  UPLOAD
+  YOUTUBE
+}
+
+enum CourseStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum LessonType {
+  VIDEO
+  TEXT
+  PDF
+}
