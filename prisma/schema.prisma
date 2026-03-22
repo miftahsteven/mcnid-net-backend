@@ -329,6 +329,19 @@ model LessonProgress {
   @@map("lesson_progress")
 }
 
+model MediaMonitoringCache {
+  id           String   @id @default(cuid())
+  query        String
+  dateFrom     String
+  dateTo       String
+  resultsData  Json
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  @@unique([query, dateFrom, dateTo])
+  @@map("media_monitoring_cache")
+}
+
 enum Role {
   SUPER_ADMIN
   ADMIN

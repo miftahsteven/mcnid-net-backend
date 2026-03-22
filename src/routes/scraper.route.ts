@@ -36,7 +36,7 @@ const allowedSources = [
   "liputan6.com",
   "tribunnews.com",
   "mui.or.id",
-  "nu.or.id"
+  "nu.or.id",
 ];
 
 function generateSlug(title: string): string {
@@ -50,11 +50,130 @@ function getYoutubeCover(url: string | null): string | null {
   if (!url) return null;
   const match = url.match(/[?&]v=([^&]+)/);
   if (match) return `https://img.youtube.com/vi/${match[1]}/maxresdefault.jpg`;
-  
+
   const shortMatch = url.match(/youtu\.be\/([^?]+)/);
-  if (shortMatch) return `https://img.youtube.com/vi/${shortMatch[1]}/maxresdefault.jpg`;
-  
+  if (shortMatch)
+    return `https://img.youtube.com/vi/${shortMatch[1]}/maxresdefault.jpg`;
+
   return null;
+}
+
+async function getCommentsForUrl(
+  url: string,
+  platformKey: string,
+  dateFromStr?: string,
+): Promise<{ comments: string[]; error?: string; stats?: { likes: number, retweets: number, replies: number } }> {
+  try {
+    let actorId = "";
+    let input: any = {};
+
+    switch (platformKey) {
+      case "facebook":
+        actorId = "apify/facebook-comments-scraper";
+        let fbUrl = url;
+        try {
+          const u = new URL(url);
+          if (
+            u.hostname.endsWith("facebook.com") &&
+            u.hostname !== "www.facebook.com"
+          ) {
+            u.hostname = "www.facebook.com";
+          }
+          fbUrl = u.toString();
+        } catch (e) {}
+        input = {
+          includeNestedComments: true,
+          onlyCommentsNewerThan: dateFromStr || "2026-03-16",
+          resultsLimit: 50,
+          startUrls: [{ url: fbUrl }],
+          viewOption: "RECENT_ACTIVITY",
+        };
+        break;
+      case "instagram":
+        actorId = "apify/instagram-comment-scraper";
+        input = { 
+          directUrls: [url],
+          includeNestedComments: true,
+          isNewestComments: false,
+          resultsLimit: 15
+        };
+        break;
+      case "x":
+        actorId = "apidojo/tweet-scraper";
+        input = { 
+          customMapFunction: "(object) => { return {...object} }",
+          includeSearchTerms: false,
+          maxItems: 20,
+          onlyImage: false,
+          onlyQuote: false,
+          onlyTwitterBlue: false,
+          onlyVerifiedUsers: false,
+          onlyVideo: false,
+          searchTerms: [],
+          sort: "Latest",
+          startUrls: [url],
+          tweetLanguage: "id"
+        };
+        break;
+      case "tiktok":
+        actorId = "apidojo/tiktok-comments-scraper";
+        input = { 
+          customMapFunction: "(object) => { return {...object} }",
+          includeReplies: false,
+          maxItems: 10,
+          startUrls: [url] 
+        };
+        break;
+      case "threads":
+        actorId = "apify/threads-scraper";
+        input = { startUrls: [{ url }], maxItems: 20 };
+        break;
+      default:
+        return { comments: [], error: "Scraping komentar tidak diizinkan" };
+    }
+
+    console.log(
+      `[Apify] Calling ${actorId} with input:`,
+      JSON.stringify(input),
+    );
+    const run = await apifyClient.actor(actorId).call(input);
+    console.log(
+      `[Apify] ${actorId} finished. runId: ${run.id}. defaultDatasetId: ${run.defaultDatasetId}`,
+    );
+
+    const { items } = await apifyClient
+      .dataset(run.defaultDatasetId)
+      .listItems();
+    console.log(
+      `[Apify] ${actorId} fetched ${items.length} items from dataset.`,
+    );
+
+    const comments = (items as any[])
+      .map((item) => item.text || item.comment || item.full_text || "")
+      .filter(Boolean)
+      .slice(0, 20);
+    console.log(
+      `[Apify] Extracted ${comments.length} comments for URL: ${url}`,
+    );
+
+    let stats;
+    if (platformKey === "x" && items.length > 0) {
+      // Find the main tweet or just use the first one if we can't reliably match the URL
+      const mainItem = (items as any[]).find(i => i.url === url || i.twitterUrl === url) || items[0];
+      if (mainItem) {
+        stats = {
+          likes: mainItem.likeCount || 0,
+          retweets: mainItem.retweetCount || 0,
+          replies: mainItem.replyCount || 0,
+        };
+      }
+    }
+
+    return { comments, stats };
+  } catch (error: any) {
+    console.error(`[Apify Error on ${url}]:`, error?.message || error);
+    return { comments: [], error: "Scraping komentar tidak diizinkan" };
+  }
 }
 
 export async function scraperRoutes(fastify: FastifyInstance) {
@@ -91,19 +210,19 @@ export async function scraperRoutes(fastify: FastifyInstance) {
             perplexitySearch: {
               enablePerplexity: false,
               returnImages: false,
-              returnRelatedQuestions: false
+              returnRelatedQuestions: false,
             },
             queries: "cholil nafis",
             resultsPerPage: 100,
             saveHtml: false,
             saveHtmlToKeyValueStore: false,
-            searchLanguage: "id"
+            searchLanguage: "id",
           });
 
         const { items } = await apifyClient
           .dataset(run.defaultDatasetId)
           .listItems();
-        
+
         const searchItems = items as any[];
         let rawNews: any[] = [];
         if (searchItems.length > 0 && searchItems[0].organicResults) {
@@ -112,12 +231,16 @@ export async function scraperRoutes(fastify: FastifyInstance) {
 
         const newsItems: ApifyNewsItem[] = rawNews.map((res: any) => ({
           title: res.title,
-          source: res.displayedUrl?.split(" ")[0]?.replace("https://", "")?.replace("www.", "") || "Media",
+          source:
+            res.displayedUrl
+              ?.split(" ")[0]
+              ?.replace("https://", "")
+              ?.replace("www.", "") || "Media",
           sourceUrl: res.url,
           publishedAt: res.date || null,
           link: res.url,
           image: null,
-          text: res.description
+          text: res.description,
         }));
 
         // 2. Filter internal duplicates and allowed sources
@@ -125,7 +248,9 @@ export async function scraperRoutes(fastify: FastifyInstance) {
         let filteredItems = newsItems.filter((item) => {
           if (!item.title || !item.sourceUrl) return false;
 
-          const isAllowed = allowedSources.some((source) => item.sourceUrl.includes(source));
+          const isAllowed = allowedSources.some((source) =>
+            item.sourceUrl.includes(source),
+          );
           if (!isAllowed) return false;
 
           // Internal Deduplicator
@@ -266,19 +391,19 @@ export async function scraperRoutes(fastify: FastifyInstance) {
             perplexitySearch: {
               enablePerplexity: false,
               returnImages: false,
-              returnRelatedQuestions: false
+              returnRelatedQuestions: false,
             },
             queries: "cholil nafis site:youtube.com",
             resultsPerPage: 100,
             saveHtml: false,
             saveHtmlToKeyValueStore: false,
-            searchLanguage: "id"
+            searchLanguage: "id",
           });
 
         const { items } = await apifyClient
           .dataset(run.defaultDatasetId)
           .listItems();
-        
+
         const searchItems = items as any[];
         let rawNews: any[] = [];
         if (searchItems.length > 0 && searchItems[0].organicResults) {
@@ -287,12 +412,16 @@ export async function scraperRoutes(fastify: FastifyInstance) {
 
         const newsItems: ApifyNewsItem[] = rawNews.map((res: any) => ({
           title: res.title,
-          source: res.displayedUrl?.split(" ")[0]?.replace("https://", "")?.replace("www.", "") || "YouTube",
+          source:
+            res.displayedUrl
+              ?.split(" ")[0]
+              ?.replace("https://", "")
+              ?.replace("www.", "") || "YouTube",
           sourceUrl: res.url,
           publishedAt: res.date || null,
           link: res.url,
           image: null,
-          text: res.description
+          text: res.description,
         }));
 
         // 2. Filter internal duplicates
@@ -338,7 +467,7 @@ export async function scraperRoutes(fastify: FastifyInstance) {
               : "";
 
             const completion = await openai.chat.completions.create({
-              model: "gpt-5.1",
+              model: "gpt-4o-mini",
               messages: [
                 {
                   role: "system",
@@ -396,6 +525,266 @@ export async function scraperRoutes(fastify: FastifyInstance) {
         console.error("Scraper Error:", error);
         return reply.status(500).send({
           error: "Failed to run youtube scraper",
+          message: error.message,
+        });
+      }
+    },
+  );
+
+  fastify.post(
+    "/monitor",
+    {
+      preHandler: [authMiddleware, requireRole("SUPER_ADMIN", "ADMIN")],
+    },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      try {
+        const { query, forceRegenerate = false } = request.body as { query: string; forceRegenerate?: boolean };
+        if (!query) {
+          return reply.status(400).send({ error: "Missing query" });
+        }
+
+        const dateFrom = new Date();
+        dateFrom.setDate(dateFrom.getDate() - 7);
+        const dateFromStr = dateFrom.toISOString().split("T")[0];
+
+        const dateTo = new Date();
+        const dateToStr = dateTo.toISOString().split("T")[0];
+
+        // CHECK CACHE
+        if (!forceRegenerate) {
+          const cached = await prisma.mediaMonitoringCache.findUnique({
+            where: {
+              query_dateFrom_dateTo: {
+                query,
+                dateFrom: dateFromStr,
+                dateTo: dateToStr,
+              }
+            }
+          });
+          
+          if (cached) {
+            console.log(`[Media Monitoring Cache] Returning cached results for query: "${query}"`);
+            return reply.send({ results: cached.resultsData });
+          }
+        }
+
+        const platforms = [
+          { key: "web", name: "Web (Media Nasional)", querySuffix: " (site:kompas.com OR site:detik.com OR site:tempo.co OR site:cnnindonesia.com OR site:republika.co.id OR site:antaranews.com OR site:viva.co.id OR site:suara.com OR site:merdeka.com OR site:liputan6.com OR site:tribunnews.com)" },
+          {
+            key: "facebook",
+            name: "Facebook",
+            querySuffix: " site:facebook.com",
+          },
+          { key: "instagram", name: "Instagram", querySuffix: " site:instagram.com" },
+          { key: "x", name: "X (Twitter)", querySuffix: " (site:twitter.com OR site:x.com)" },
+          { key: "tiktok", name: "TikTok", querySuffix: " site:tiktok.com" },
+          // { key: "threads", name: "Threads", querySuffix: " site:threads.net" },
+        ];
+
+        const monitoringResults = await Promise.all(
+          platforms.map(async (platform) => {
+            try {
+              const run = await apifyClient
+                .actor("apify/google-search-scraper")
+                .call({
+                  afterDate: dateFromStr,
+                  beforeDate: dateToStr,
+                  chatGptSearch: { enableChatGpt: false },
+                  countryCode: "id",
+                  disableGoogleSearchResults: false,
+                  focusOnPaidAds: false,
+                  forceExactMatch: false,
+                  includeIcons: false,
+                  includeUnfilteredResults: false,
+                  maxPagesPerQuery: 1,
+                  resultsPerPage: 20,
+                  queries: `${query}${platform.querySuffix}`,
+                  saveHtml: false,
+                  saveHtmlToKeyValueStore: false,
+                  searchLanguage: "id",
+                });
+
+              const { items } = await apifyClient
+                .dataset(run.defaultDatasetId)
+                .listItems();
+
+              const searchItems = items as any[];
+              let rawResults: any[] = [];
+              let totalCount = 0;
+
+              if (searchItems.length > 0) {
+                rawResults = searchItems[0].organicResults || [];
+                totalCount =
+                  searchItems[0].searchInformation?.totalResults ||
+                  rawResults.length;
+              }
+
+              const topResults = rawResults.slice(0, 5).map((res: any) => ({
+                title: res.title,
+                link: res.url,
+                snippet: res.description,
+              }));
+
+              // Sentiment analysis in parallel for these top results using OpenAI
+              const analyzedResults = await Promise.all(
+                topResults.map(async (item) => {
+                  try {
+                    // 1. Content Sentiment
+                    const sentimentCompletion =
+                      await openai.chat.completions.create({
+                        model: "gpt-4o-mini",
+                        messages: [
+                          {
+                            role: "system",
+                            content:
+                              "Anda adalah analis sentimen media. Tentukan sentimen (Positif, Netral, Negatif) dari judul/konten berikut. Jawab hanya dengan satu kata: Positif, Netral, atau Negatif.",
+                          },
+                          {
+                            role: "user",
+                            content: `Judul: ${item.title}\nSnippet: ${item.snippet}`,
+                          },
+                        ],
+                        max_tokens: 10,
+                      });
+
+                    const contentSentiment =
+                      sentimentCompletion.choices[0].message.content
+                        ?.trim()
+                        ?.replace(".", "") || "Netral";
+
+                    // 2. Comments Scraping (Best effort for top 3 per platform to save time/cost)
+                    const commentData = await getCommentsForUrl(
+                      item.link,
+                      platform.key,
+                      dateFromStr,
+                    );
+
+                    let commentSentiment = {
+                      Positif: 0,
+                      Netral: 0,
+                      Negatif: 0,
+                    };
+                    let analyzedComments: {
+                      text: string;
+                      sentiment: string;
+                    }[] = [];
+
+                    if (commentData.comments.length > 0) {
+                      const commentAnalyses = await Promise.all(
+                        commentData.comments.map(async (text) => {
+                          try {
+                            const comp = await openai.chat.completions.create({
+                              model: "gpt-4o-mini",
+                              messages: [
+                                {
+                                  role: "system",
+                                  content:
+                                    "Tentukan sentimen (Positif, Netral, Negatif) dari komentar ini. Jawab satu kata saja.",
+                                },
+                                { role: "user", content: text },
+                              ],
+                              max_tokens: 5,
+                            });
+                            const sent =
+                              comp.choices[0].message.content
+                                ?.trim()
+                                ?.replace(".", "") || "Netral";
+                            return { text, sentiment: sent };
+                          } catch {
+                            return { text, sentiment: "Netral" };
+                          }
+                        }),
+                      );
+
+                      commentAnalyses.forEach((c) => {
+                        if (c.sentiment === "Positif")
+                          commentSentiment.Positif++;
+                        else if (c.sentiment === "Negatif")
+                          commentSentiment.Negatif++;
+                        else commentSentiment.Netral++;
+                      });
+                      analyzedComments = commentAnalyses.slice(0, 20);
+                    }
+
+                    return {
+                      ...item,
+                      sentiment: contentSentiment,
+                      commentSentiment,
+                      comments: analyzedComments,
+                      commentError: commentData.error,
+                      stats: commentData.stats
+                    };
+                  } catch (err: any) {
+                    console.error(
+                      `Error processing item ${item.title}:`,
+                      err?.message || err,
+                    );
+                    return {
+                      ...item,
+                      sentiment: "Netral",
+                      comments: [],
+                      commentSentiment: { Positif: 0, Netral: 0, Negatif: 0 },
+                    };
+                  }
+                }),
+              );
+
+              return {
+                key: platform.key,
+                name: platform.name,
+                quantity: totalCount,
+                items: analyzedResults,
+              };
+            } catch (error) {
+              console.error(`Scraping error for ${platform.name}:`, error);
+              return {
+                key: platform.key,
+                name: platform.name,
+                error: "Proses scrap ada kendala",
+                quantity: 0,
+                items: [],
+              };
+            }
+          }),
+        );
+
+        const results: any = {};
+        monitoringResults.forEach((res) => {
+          if (res) {
+            const { key, ...data } = res;
+            results[key] = data;
+          }
+        });
+
+        // SAVE TO CACHE
+        console.log(`[Media Monitoring Cache] Upserting cache for query: "${query}"`);
+        await prisma.mediaMonitoringCache.upsert({
+          where: {
+            query_dateFrom_dateTo: {
+              query,
+              dateFrom: dateFromStr,
+              dateTo: dateToStr,
+            }
+          },
+          update: {
+            resultsData: results
+          },
+          create: {
+            query,
+            dateFrom: dateFromStr,
+            dateTo: dateToStr,
+            resultsData: results
+          }
+        });
+
+        return reply.status(200).send({
+          query,
+          results,
+        });
+      } catch (error: any) {
+        console.error("Monitor Scraper Error:", error);
+        return reply.status(500).send({
+          error: "Failed to run monitor scraper",
           message: error.message,
         });
       }
