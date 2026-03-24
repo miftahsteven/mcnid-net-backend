@@ -1249,8 +1249,9 @@ export async function scraperRoutes(fastify: FastifyInstance) {
             timestamp: new Date(item.timestamp),
             likesCount: likes,
             commentsCount: comments,
-            reposts: item.reshareCount || item.videoPlayCount || 0, // Fallback to playCount maybe?
-            shared: item.videoPlayCount || 0, // Shared is elusive, using playCount as proxy for now
+            reposts: item.reshareCount || 0, 
+            shared: 0, 
+            viewsCount: item.videoPlayCount || 0,
             er: parseFloat(er.toFixed(4)),
             hashtags: item.hashtags || [],
             profileId: profile.id

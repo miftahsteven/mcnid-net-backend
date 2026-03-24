@@ -433,6 +433,7 @@ model SocmedPost {
   commentsCount Int      @default(0)
   reposts       Int      @default(0)
   shared        Int      @default(0)
+  viewsCount    Int      @default(0)
   er            Float    @default(0)
   hashtags      Json?    // Array of strings
   profileId     String
