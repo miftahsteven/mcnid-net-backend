@@ -342,6 +342,33 @@ model MediaMonitoringCache {
   @@map("media_monitoring_cache")
 }
 
+model SocmedProfile {
+  id              String   @id @default(cuid())
+  handle          String   // e.g. @cholilnafis
+  platform        String   // instagram, tiktok, x, facebook
+  name            String?
+  avatar          String?
+  bio             String?
+  followers       Int      @default(0)
+  following       Int      @default(0)
+  posts           Int      @default(0)
+  er              Float    @default(0)
+  avgLikes        Float    @default(0)
+  avgComments     Float    @default(0)
+  recentTrend     Json?    // Array of engagement counts or rates
+  followersTrend  Json?    // Array of followers counts over time
+  trendDates      Json?    // Array of dates for the above trends
+  isPrivate       Boolean  @default(false)
+  posts_detail    SocmedPost[]
+  lastScraped     DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([handle, platform])
+  @@index([handle, platform])
+  @@map("socmed_profiles")
+}
+
 enum Role {
   SUPER_ADMIN
   ADMIN
@@ -392,4 +419,27 @@ enum LessonType {
   VIDEO
   TEXT
   PDF
+}
+
+model SocmedPost {
+  id            String   @id @default(cuid())
+  postId        String   // Unique ID from platform
+  url           String
+  type          String   // Image, Video, Sidecar, etc.
+  displayUrl    String?  // Local saved image path
+  caption       String?  @db.Text
+  timestamp     DateTime
+  likesCount    Int      @default(0)
+  commentsCount Int      @default(0)
+  reposts       Int      @default(0)
+  shared        Int      @default(0)
+  er            Float    @default(0)
+  hashtags      Json?    // Array of strings
+  profileId     String
+  profile       SocmedProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([postId, profileId])
+  @@map("socmed_posts")
 }
