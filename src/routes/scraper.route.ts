@@ -3,8 +3,8 @@ import { ApifyClient } from "apify-client";
 import OpenAI from "openai";
 import { prisma } from "../lib/prisma";
 import { authMiddleware, requireRole } from "../middlewares/auth.middleware";
-import fs from 'fs';
-import path from 'path';
+import fs from "fs";
+import path from "path";
 
 interface ApifyNewsItem {
   title: string;
@@ -64,10 +64,10 @@ async function getCommentsForUrl(
   url: string,
   platformKey: string,
   dateFromStr?: string,
-): Promise<{ 
-  comments: any[]; 
-  error?: string; 
-  stats?: { likes: number, retweets: number, replies: number };
+): Promise<{
+  comments: any[];
+  error?: string;
+  stats?: { likes: number; retweets: number; replies: number };
   postUsername?: string;
   postIsVerified?: boolean;
 }> {
@@ -97,24 +97,24 @@ async function getCommentsForUrl(
           proxy: {
             useApifyProxy: true,
             apifyProxyGroups: ["RESIDENTIAL"],
-            apifyProxyCountry: "ID"
+            apifyProxyCountry: "ID",
           },
           sort_type: "newest",
-          url: fbUrl
+          url: fbUrl,
         };
         break;
       case "instagram":
         actorId = "apify/instagram-comment-scraper";
-        input = { 
+        input = {
           directUrls: [url],
           includeNestedComments: true,
           isNewestComments: false,
-          resultsLimit: 15
+          resultsLimit: 15,
         };
         break;
       case "x":
         actorId = "apidojo/tweet-scraper";
-        input = { 
+        input = {
           customMapFunction: "(object) => { return {...object} }",
           includeSearchTerms: false,
           maxItems: 20,
@@ -126,16 +126,16 @@ async function getCommentsForUrl(
           searchTerms: [],
           sort: "Latest",
           startUrls: [url],
-          tweetLanguage: "id"
+          tweetLanguage: "id",
         };
         break;
       case "tiktok":
         actorId = "apidojo/tiktok-comments-scraper";
-        input = { 
+        input = {
           customMapFunction: "(object) => { return {...object} }",
           includeReplies: false,
           maxItems: 10,
-          startUrls: [url] 
+          startUrls: [url],
         };
         break;
       case "threads":
@@ -164,31 +164,51 @@ async function getCommentsForUrl(
 
     const comments = (items as any[])
       .map((item) => {
-        const text = item.text || item.message || item.comment || item.full_text || "";
+        const text =
+          item.text || item.message || item.comment || item.full_text || "";
         if (!text) return null;
         let extUsername = "Unknown";
-        if (typeof item.author === 'string') extUsername = item.author;
+        if (typeof item.author === "string") extUsername = item.author;
         else if (item.author?.name) extUsername = item.author.name;
         else if (item.author?.userName) extUsername = item.author.userName;
         else if (item.author?.username) extUsername = item.author.username;
-        else if (typeof item.ownerUsername === 'string') extUsername = item.ownerUsername;
+        else if (typeof item.ownerUsername === "string")
+          extUsername = item.ownerUsername;
         else if (item.user?.screen_name) extUsername = item.user.screen_name;
         else if (item.user?.username) extUsername = item.user.username;
 
-        let extIsVerified = item.isVerified || item.user?.verified || item.owner_is_verified || item.author?.is_verified || item.author?.isVerified || item.author?.isBlueVerified || false;
+        let extIsVerified =
+          item.isVerified ||
+          item.user?.verified ||
+          item.owner_is_verified ||
+          item.author?.is_verified ||
+          item.author?.isVerified ||
+          item.author?.isBlueVerified ||
+          false;
 
         let parsedLikes = 0;
         if (item.reaction_count !== undefined) {
-          parsedLikes = typeof item.reaction_count === 'string' ? parseInt(item.reaction_count, 10) : item.reaction_count;
+          parsedLikes =
+            typeof item.reaction_count === "string"
+              ? parseInt(item.reaction_count, 10)
+              : item.reaction_count;
         }
 
         return {
           text,
           username: extUsername,
           isVerified: extIsVerified,
-          likes: parsedLikes || item.likesCount || item.favorite_count || item.like_count || 0,
+          likes:
+            parsedLikes ||
+            item.likesCount ||
+            item.favorite_count ||
+            item.like_count ||
+            0,
           profileUrl: item.author?.profile_url || item.user?.url || null,
-          profileImageUrl: item.author?.profile_image_url || item.user?.profile_image_url || null,
+          profileImageUrl:
+            item.author?.profile_image_url ||
+            item.user?.profile_image_url ||
+            null,
         };
       })
       .filter(Boolean)
@@ -200,7 +220,9 @@ async function getCommentsForUrl(
     let stats, postUsername, postIsVerified;
     if (platformKey === "x" && items.length > 0) {
       // Find the main tweet or just use the first one if we can't reliably match the URL
-      const mainItem = (items as any[]).find(i => i.url === url || i.twitterUrl === url) || items[0];
+      const mainItem =
+        (items as any[]).find((i) => i.url === url || i.twitterUrl === url) ||
+        items[0];
       if (mainItem) {
         stats = {
           likes: mainItem.likeCount || mainItem.favorite_count || 0,
@@ -208,7 +230,8 @@ async function getCommentsForUrl(
           replies: mainItem.replyCount || mainItem.reply_count || 0,
         };
         postIsVerified = mainItem.user?.verified || false;
-        if (!postUsername && mainItem.user?.screen_name) postUsername = '@' + mainItem.user.screen_name;
+        if (!postUsername && mainItem.user?.screen_name)
+          postUsername = "@" + mainItem.user.screen_name;
       }
     } else if (platformKey === "tiktok" && items.length > 0) {
       // Sometimes tiktok actor returns video stats in the first item or a specific format, but typically it's for comments
@@ -336,6 +359,7 @@ export async function scraperRoutes(fastify: FastifyInstance) {
               : "";
 
             const completion = await openai.chat.completions.create({
+              //model: "gpt-4o-mini",
               //model: "gpt-4o-mini",
               model: "gpt-5.1",
               messages: [
@@ -583,7 +607,10 @@ export async function scraperRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const { query, forceRegenerate = false } = request.body as { query: string; forceRegenerate?: boolean };
+        const { query, forceRegenerate = false } = request.body as {
+          query: string;
+          forceRegenerate?: boolean;
+        };
         if (!query) {
           return reply.status(400).send({ error: "Missing query" });
         }
@@ -603,25 +630,40 @@ export async function scraperRoutes(fastify: FastifyInstance) {
                 query,
                 dateFrom: dateFromStr,
                 dateTo: dateToStr,
-              }
-            }
+              },
+            },
           });
-          
+
           if (cached) {
-            console.log(`[Media Monitoring Cache] Returning cached results for query: "${query}"`);
+            console.log(
+              `[Media Monitoring Cache] Returning cached results for query: "${query}"`,
+            );
             return reply.send({ results: cached.resultsData });
           }
         }
 
         const platforms = [
-          { key: "web", name: "Web (Media Nasional)", querySuffix: " (site:kompas.com OR site:detik.com OR site:tempo.co OR site:cnnindonesia.com OR site:republika.co.id OR site:antaranews.com OR site:viva.co.id OR site:suara.com OR site:merdeka.com OR site:liputan6.com OR site:tribunnews.com)" },
+          {
+            key: "web",
+            name: "Web (Media Nasional)",
+            querySuffix:
+              " (site:kompas.com OR site:detik.com OR site:tempo.co OR site:cnnindonesia.com OR site:republika.co.id OR site:antaranews.com OR site:viva.co.id OR site:suara.com OR site:merdeka.com OR site:liputan6.com OR site:tribunnews.com)",
+          },
           {
             key: "facebook",
             name: "Facebook",
             querySuffix: " site:facebook.com",
           },
-          { key: "instagram", name: "Instagram", querySuffix: " site:instagram.com" },
-          { key: "x", name: "X (Twitter)", querySuffix: " (site:twitter.com OR site:x.com)" },
+          {
+            key: "instagram",
+            name: "Instagram",
+            querySuffix: " site:instagram.com",
+          },
+          {
+            key: "x",
+            name: "X (Twitter)",
+            querySuffix: " (site:twitter.com OR site:x.com)",
+          },
           { key: "tiktok", name: "TikTok", querySuffix: " site:tiktok.com" },
           // { key: "threads", name: "Threads", querySuffix: " site:threads.net" },
         ];
@@ -671,23 +713,40 @@ export async function scraperRoutes(fastify: FastifyInstance) {
 
                 try {
                   const urlObj = new URL(res.url);
-                  if (platform.key === 'web') {
-                    const host = urlObj.hostname.replace(/^www\./, '');
+                  if (platform.key === "web") {
+                    const host = urlObj.hostname.replace(/^www\./, "");
                     mediaName = host;
                     mediaLogo = `https://www.google.com/s2/favicons?domain=${host}&sz=128`;
                   } else {
-                    const pathParts = urlObj.pathname.split('/').filter(Boolean);
-                    if (platform.key === 'x' && pathParts.length > 0) {
-                      postUsername = '@' + pathParts[0];
-                    } else if (platform.key === 'tiktok' && pathParts.length > 0 && pathParts[0].startsWith('@')) {
+                    const pathParts = urlObj.pathname
+                      .split("/")
+                      .filter(Boolean);
+                    if (platform.key === "x" && pathParts.length > 0) {
+                      postUsername = "@" + pathParts[0];
+                    } else if (
+                      platform.key === "tiktok" &&
+                      pathParts.length > 0 &&
+                      pathParts[0].startsWith("@")
+                    ) {
                       postUsername = pathParts[0];
-                    } else if (platform.key === 'instagram' && pathParts[0] !== 'p' && pathParts[0] !== 'reel' && pathParts.length > 0) {
-                      postUsername = '@' + pathParts[0];
-                    } else if (platform.key === 'facebook' && pathParts[0] !== 'groups' && pathParts[0] !== 'watch' && pathParts[0] !== 'story.php' && pathParts.length > 0) {
+                    } else if (
+                      platform.key === "instagram" &&
+                      pathParts[0] !== "p" &&
+                      pathParts[0] !== "reel" &&
+                      pathParts.length > 0
+                    ) {
+                      postUsername = "@" + pathParts[0];
+                    } else if (
+                      platform.key === "facebook" &&
+                      pathParts[0] !== "groups" &&
+                      pathParts[0] !== "watch" &&
+                      pathParts[0] !== "story.php" &&
+                      pathParts.length > 0
+                    ) {
                       postUsername = pathParts[0];
                     }
                   }
-                } catch(e) {}
+                } catch (e) {}
 
                 return {
                   title: res.title,
@@ -792,8 +851,9 @@ export async function scraperRoutes(fastify: FastifyInstance) {
                       comments: analyzedComments,
                       commentError: commentData.error,
                       stats: commentData.stats,
-                      postUsername: item.postUsername || (commentData as any).postUsername,
-                      postIsVerified: (commentData as any).postIsVerified
+                      postUsername:
+                        item.postUsername || (commentData as any).postUsername,
+                      postIsVerified: (commentData as any).postIsVerified,
                     };
                   } catch (err: any) {
                     console.error(
@@ -838,24 +898,26 @@ export async function scraperRoutes(fastify: FastifyInstance) {
         });
 
         // SAVE TO CACHE
-        console.log(`[Media Monitoring Cache] Upserting cache for query: "${query}"`);
+        console.log(
+          `[Media Monitoring Cache] Upserting cache for query: "${query}"`,
+        );
         await prisma.mediaMonitoringCache.upsert({
           where: {
             query_dateFrom_dateTo: {
               query,
               dateFrom: dateFromStr,
               dateTo: dateToStr,
-            }
+            },
           },
           update: {
-            resultsData: results
+            resultsData: results,
           },
           create: {
             query,
             dateFrom: dateFromStr,
             dateTo: dateToStr,
-            resultsData: results
-          }
+            resultsData: results,
+          },
         });
 
         return reply.status(200).send({
@@ -872,26 +934,34 @@ export async function scraperRoutes(fastify: FastifyInstance) {
     },
   );
 
-  async function downloadProfilePicUrl(url: string, handle: string, platform: string, request: FastifyRequest): Promise<string> {
-    if (!url || url.includes('dicebear')) return url;
-    
+  async function downloadProfilePicUrl(
+    url: string,
+    handle: string,
+    platform: string,
+    request: FastifyRequest,
+  ): Promise<string> {
+    if (!url || url.includes("dicebear")) return url;
+
     try {
       const response = await fetch(url);
       if (!response.ok) {
         console.warn(`Failed to fetch photo for ${handle}: ${response.status}`);
         return url;
       }
-      
-      const contentType = response.headers.get('content-type') || 'image/jpeg';
-      let ext = contentType.split('/')[1] || 'jpg';
-      if (ext === 'jpeg') ext = 'jpg';
-      
-      const uploadsDir = path.join(__dirname, '../../public/uploads/socmed-profiles');
+
+      const contentType = response.headers.get("content-type") || "image/jpeg";
+      let ext = contentType.split("/")[1] || "jpg";
+      if (ext === "jpeg") ext = "jpg";
+
+      const uploadsDir = path.join(
+        __dirname,
+        "../../public/uploads/socmed-profiles",
+      );
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
       }
-      
-      const cleanHandle = handle.replace('@', '');
+
+      const cleanHandle = handle.replace("@", "");
       const filename = `${platform}-${cleanHandle}.${ext}`;
       const filepath = path.join(uploadsDir, filename);
 
@@ -899,50 +969,82 @@ export async function scraperRoutes(fastify: FastifyInstance) {
       const buffer = Buffer.from(arrayBuffer);
       fs.writeFileSync(filepath, buffer);
 
-      const host = request.headers.host || process.env.BACKEND_URL?.replace(/^https?:\/\//, '') || 'localhost:4000';
+      const host =
+        request.headers.host ||
+        process.env.BACKEND_URL?.replace(/^https?:\/\//, "") ||
+        "localhost:4000";
       const cacheBuster = Date.now();
       return `${request.protocol}://${host}/uploads/socmed-profiles/${filename}?v=${cacheBuster}`;
     } catch (err) {
-      console.error('Download avatar error:', err);
+      console.error("Download avatar error:", err);
       return url;
     }
   }
 
-  async function downloadPostMedia(url: string, postId: string, platform: string, request: FastifyRequest): Promise<string> {
+  async function downloadPostMedia(
+    url: string,
+    postId: string,
+    platform: string,
+    request: FastifyRequest,
+  ): Promise<string> {
     if (!url) return "";
-    
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
+
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeout);
+
       if (!response.ok) {
-        console.warn(`Failed to fetch media for post ${postId}: ${response.status}`);
+        console.warn(
+          `[Media Download] Skip post ${postId}: HTTP ${response.status}`,
+        );
         return url;
       }
-      
-      const contentType = response.headers.get('content-type') || 'image/jpeg';
-      let ext = contentType.split('/')[1] || 'jpg';
-      if (ext === 'jpeg') ext = 'jpg';
-      
-      const uploadsDir = path.join(__dirname, '../../public/uploads/socmed/posts');
+
+      const contentType = response.headers.get("content-type") || "image/jpeg";
+      let ext = contentType.split("/")[1] || "jpg";
+      if (ext === "jpeg") ext = "jpg";
+
+      const uploadsDir = path.join(
+        __dirname,
+        "../../public/uploads/socmed/posts",
+      );
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
       }
-      
+
       const filename = `${platform}-${postId}.${ext}`;
       const filepath = path.join(uploadsDir, filename);
 
       const arrayBuffer = await response.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);
       fs.writeFileSync(filepath, buffer);
-      
-      const host = request.headers.host || process.env.BACKEND_URL?.replace(/^https?:\/\//, '') || 'localhost:4000';
+
+      const host =
+        request.headers.host ||
+        process.env.BACKEND_URL?.replace(/^https?:\/\//, "") ||
+        "localhost:4000";
       return `${request.protocol}://${host}/uploads/socmed/posts/${filename}`;
-    } catch (e) {
-      console.error(`Error downloading media for post ${postId}:`, e);
-      return url;
+    } catch (e: any) {
+      clearTimeout(timeout);
+      if (e.name === "AbortError") {
+        console.warn(
+          `[Media Download] Timeout downloading media for post ${postId}`,
+        );
+      } else {
+        console.error(`[Media Download] Error for post ${postId}:`, e.message);
+      }
+      return url; // Fallback to original URL
     }
   }
 
-  async function scrapeSocmedProfile(handle: string, platform: string, request: FastifyRequest) {
+  async function scrapeSocmedProfile(
+    handle: string,
+    platform: string,
+    request: FastifyRequest,
+  ) {
     let actorId = "";
     let input: any = {};
     const cleanHandle = handle.replace("@", "");
@@ -954,14 +1056,14 @@ export async function scraperRoutes(fastify: FastifyInstance) {
         dateFrom.setDate(dateFrom.getDate() - 7);
         const dateFromStr = dateFrom.toISOString().split("T")[0];
 
-        input = { 
+        input = {
           addParentData: false,
           directUrls: [`https://www.instagram.com/${cleanHandle}`],
           onlyPostsNewerThan: dateFromStr,
           resultsLimit: 50,
           resultsType: "details",
           searchLimit: 1,
-          searchType: "hashtag"
+          searchType: "hashtag",
         };
         break;
       case "tiktok":
@@ -978,12 +1080,14 @@ export async function scraperRoutes(fastify: FastifyInstance) {
 
     console.log(`[Apify Socmed] Calling ${actorId} for ${handle}`);
     const run = await apifyClient.actor(actorId).call(input);
-    const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
+    const { items } = await apifyClient
+      .dataset(run.defaultDatasetId)
+      .listItems();
 
     if (items.length === 0) return null;
 
     const profile = items[0] as any;
-    
+
     // Normalize data
     let followers = 0;
     let following = 0;
@@ -999,7 +1103,7 @@ export async function scraperRoutes(fastify: FastifyInstance) {
       following = profile.followsCount || 0;
       posts = profile.postsCount || 0;
       isPrivate = profile.private || profile.isPrivate || false;
-      
+
       let totalLikes = 0;
       let totalComments = 0;
       let postCount = 0;
@@ -1007,22 +1111,26 @@ export async function scraperRoutes(fastify: FastifyInstance) {
 
       if (profile.latestPosts && Array.isArray(profile.latestPosts)) {
         postCount = profile.latestPosts.length;
-        
-        // Sort posts by timestamp ascending 
-        const sortedPosts = [...profile.latestPosts].sort((a,b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-        
+
+        // Sort posts by timestamp ascending
+        const sortedPosts = [...profile.latestPosts].sort(
+          (a, b) =>
+            new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
+        );
+
         for (const post of sortedPosts) {
-            totalLikes += post.likesCount || 0;
-            totalComments += post.commentsCount || 0;
-            
-            // Calculate ER per post and cap at 100%
-            const postEngagements = 
-                (post.likesCount || 0) + 
-                (post.commentsCount || 0) + 
-                (post.sharesCount || post.reelShareCount || post.shareCount || 0) +
-                (post.reshareCount || post.repostsCount || 0);
-            const postEr = followers > 0 ? (postEngagements / followers) * 100 : 0;
-            trendData.push(Number(postEr.toFixed(2)));
+          totalLikes += post.likesCount || 0;
+          totalComments += post.commentsCount || 0;
+
+          // Calculate ER per post and cap at 100%
+          const postEngagements =
+            (post.likesCount || 0) +
+            (post.commentsCount || 0) +
+            (post.sharesCount || post.reelShareCount || post.shareCount || 0) +
+            (post.reshareCount || post.repostsCount || 0);
+          const postEr =
+            followers > 0 ? (postEngagements / followers) * 100 : 0;
+          trendData.push(Number(postEr.toFixed(2)));
         }
       }
 
@@ -1030,10 +1138,10 @@ export async function scraperRoutes(fastify: FastifyInstance) {
         avgLikes = Math.round(totalLikes / postCount);
         avgComments = Math.round(totalComments / postCount);
         er = followers > 0 ? ((avgLikes + avgComments) / followers) * 100 : 0;
-        
+
         recentTrend = trendData.slice(-7);
         while (recentTrend.length < 7) {
-            recentTrend.unshift(0);
+          recentTrend.unshift(0);
         }
       } else {
         er = profile.engagementRate || 0;
@@ -1051,8 +1159,18 @@ export async function scraperRoutes(fastify: FastifyInstance) {
       isPrivate = profile.protected || false;
     }
 
-    let avatarUrl = profile.profilePicUrlHD || profile.profilePicUrl || profile.avatarThumb || profile.profile_image_url || profile.profileImageUrl;
-    avatarUrl = await downloadProfilePicUrl(avatarUrl, handle, platform, request);
+    let avatarUrl =
+      profile.profilePicUrlHD ||
+      profile.profilePicUrl ||
+      profile.avatarThumb ||
+      profile.profile_image_url ||
+      profile.profileImageUrl;
+    avatarUrl = await downloadProfilePicUrl(
+      avatarUrl,
+      handle,
+      platform,
+      request,
+    );
 
     // Calculate Followers Trend (7 days)
     // Since we don't have historical data, estimate based on current growth patterns
@@ -1062,27 +1180,39 @@ export async function scraperRoutes(fastify: FastifyInstance) {
     const growthFactor = estimatedDailyGrowth + erImpact;
 
     for (let i = 6; i >= 0; i--) {
-        const noise = (Math.random() - 0.5) * 0.0002;
-        const dayFactor = 1 - (growthFactor * i) + noise;
-        followersTrend.push(Math.round(followers * dayFactor));
+      const noise = (Math.random() - 0.5) * 0.0002;
+      const dayFactor = 1 - growthFactor * i + noise;
+      followersTrend.push(Math.round(followers * dayFactor));
     }
 
     // Generate Dates for Trend (last 7 days)
     const trendDates: string[] = [];
     const now = new Date();
     for (let i = 6; i >= 0; i--) {
-        const d = new Date(now);
-        d.setDate(now.getDate() - i);
-        // Format: "17 Mar"
-        trendDates.push(d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short' }));
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      // Format: "17 Mar"
+      trendDates.push(
+        d.toLocaleDateString("id-ID", { day: "2-digit", month: "short" }),
+      );
     }
 
     const result = {
       handle: handle.startsWith("@") ? handle : `@${handle}`,
       platform,
-      name: profile.fullName || profile.nickname || profile.name || profile.username || handle,
+      name:
+        profile.fullName ||
+        profile.nickname ||
+        profile.name ||
+        profile.username ||
+        handle,
       avatar: avatarUrl,
-      bio: profile.biography || profile.signature || profile.description || profile.bio || "",
+      bio:
+        profile.biography ||
+        profile.signature ||
+        profile.description ||
+        profile.bio ||
+        "",
       followers,
       following,
       posts,
@@ -1106,10 +1236,14 @@ export async function scraperRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const { handle, platform = "instagram", forceRegenerate = false } = request.body as { 
-          handle: string; 
-          platform?: string; 
-          forceRegenerate?: boolean 
+        const {
+          handle,
+          platform = "instagram",
+          forceRegenerate = false,
+        } = request.body as {
+          handle: string;
+          platform?: string;
+          forceRegenerate?: boolean;
         };
 
         if (!handle) {
@@ -1124,22 +1258,31 @@ export async function scraperRoutes(fastify: FastifyInstance) {
             where: {
               handle_platform: {
                 handle: normalizedHandle,
-                platform
-              }
-            }
+                platform,
+              },
+            },
           });
 
           // If cache is fresh (less than 24h)
-          if (cached && (Date.now() - cached.lastScraped.getTime() < 24 * 60 * 60 * 1000)) {
+          if (
+            cached &&
+            Date.now() - cached.lastScraped.getTime() < 24 * 60 * 60 * 1000
+          ) {
             return reply.status(200).send(cached);
           }
         }
 
         // 2. Scrap with Apify
-        const scrapedData = await scrapeSocmedProfile(normalizedHandle, platform, request);
+        const scrapedData = await scrapeSocmedProfile(
+          normalizedHandle,
+          platform,
+          request,
+        );
 
         if (!scrapedData) {
-          return reply.status(404).send({ error: "Account not found or could not be scraped" });
+          return reply
+            .status(404)
+            .send({ error: "Account not found or could not be scraped" });
         }
 
         // 3. Save to DB
@@ -1147,11 +1290,11 @@ export async function scraperRoutes(fastify: FastifyInstance) {
           where: {
             handle_platform: {
               handle: normalizedHandle,
-              platform
-            }
+              platform,
+            },
           },
           update: scrapedData,
-          create: scrapedData
+          create: scrapedData,
         });
 
         return reply.status(200).send(savedProfile);
@@ -1162,7 +1305,7 @@ export async function scraperRoutes(fastify: FastifyInstance) {
           message: error.message,
         });
       }
-    }
+    },
   );
 
   fastify.post(
@@ -1172,8 +1315,12 @@ export async function scraperRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const { handle, platform = "instagram", forceRegenerate = false } = request.body as { 
-          handle: string; 
+        const {
+          handle,
+          platform = "instagram",
+          forceRegenerate = false,
+        } = request.body as {
+          handle: string;
           platform?: string;
           forceRegenerate?: boolean;
         };
@@ -1183,46 +1330,51 @@ export async function scraperRoutes(fastify: FastifyInstance) {
         }
 
         const normalizedHandle = handle.startsWith("@") ? handle : `@${handle}`;
-        
+
         // 1. Get profile from DB to get followers count for ER per post
         const profile = await prisma.socmedProfile.findUnique({
           where: {
             handle_platform: {
               handle: normalizedHandle,
-              platform
-            }
-          }
+              platform,
+            },
+          },
         });
 
         if (!profile) {
-          return reply.status(404).send({ error: "Profile analysis not found. Please analyze profile first." });
+          return reply
+            .status(404)
+            .send({
+              error:
+                "Profile analysis not found. Please analyze profile first.",
+            });
         }
 
         if (profile.isPrivate) {
-            return reply.status(200).send({ isPrivate: true, posts: [] });
+          return reply.status(200).send({ isPrivate: true, posts: [] });
         }
 
         // 2. Check Cache
         if (!forceRegenerate) {
           const cachedPosts = await prisma.socmedPost.findMany({
             where: { profileId: profile.id },
-            orderBy: { timestamp: 'desc' }
+            orderBy: { timestamp: "desc" },
           });
 
           if (cachedPosts.length > 0) {
-            return reply.status(200).send({ 
+            return reply.status(200).send({
               handle: normalizedHandle,
               platform,
-              posts: cachedPosts.map((p, i) => ({ ...p, no: i + 1 }))
+              posts: cachedPosts.map((p, i) => ({ ...p, no: i + 1 })),
             });
           }
         }
 
         // 3. Hybrid Scraping Logic (Reels + General Posts)
-        const username = normalizedHandle.replace('@', '');
-        
+        const username = normalizedHandle.replace("@", "");
+
         console.log(`[Apify] Starting hybrid scrape for ${normalizedHandle}`);
-        
+
         // Use allSettled so one failure doesn't kill the whole process
         const results = await Promise.allSettled([
           apifyClient.actor("apify/instagram-reel-scraper").call({
@@ -1237,36 +1389,58 @@ export async function scraperRoutes(fastify: FastifyInstance) {
             directUrls: [`https://www.instagram.com/${username}`],
             resultsLimit: 20,
             resultsType: "posts",
-            proxy: { useApifyProxy: true, apifyProxyGroups: ["RESIDENTIAL"] }
-          })
+            proxy: { useApifyProxy: true, apifyProxyGroups: ["RESIDENTIAL"] },
+          }),
         ]);
 
-        const reelRunTask = results[0].status === 'fulfilled' ? results[0].value : null;
-        const generalRunTask = results[1].status === 'fulfilled' ? results[1].value : null;
+        const reelRunTask =
+          results[0].status === "fulfilled" ? results[0].value : null;
+        const generalRunTask =
+          results[1].status === "fulfilled" ? results[1].value : null;
 
         if (!reelRunTask && !generalRunTask) {
-          throw new Error("Both Instagram scrapers failed to start. Please check your Apify quota or connection.");
+          throw new Error(
+            "Both Instagram scrapers failed to start. Please check your Apify quota or connection.",
+          );
         }
 
         // Fetch datasets
-        console.log(`[Apify] Fetching datasets (Reel: ${!!reelRunTask}, General: ${!!generalRunTask})`);
+        console.log(
+          `[Apify] Fetching datasets (Reel: ${!!reelRunTask}, General: ${!!generalRunTask})`,
+        );
         const datasetResults = await Promise.allSettled([
-          reelRunTask ? apifyClient.dataset(reelRunTask.defaultDatasetId).listItems() : Promise.reject("No Reel Task"),
-          generalRunTask ? apifyClient.dataset(generalRunTask.defaultDatasetId).listItems() : Promise.reject("No General Task")
+          reelRunTask
+            ? apifyClient.dataset(reelRunTask.defaultDatasetId).listItems()
+            : Promise.reject("No Reel Task"),
+          generalRunTask
+            ? apifyClient.dataset(generalRunTask.defaultDatasetId).listItems()
+            : Promise.reject("No General Task"),
         ]);
 
-        const reelItems = (datasetResults[0].status === 'fulfilled' ? datasetResults[0].value.items : []) || [];
-        const generalItems = (datasetResults[1].status === 'fulfilled' ? datasetResults[1].value.items : []) || [];
-        
-        console.log(`[Apify] Received ${reelItems.length} Reels and ${generalItems.length} general items`);
+        const reelItems =
+          (datasetResults[0].status === "fulfilled"
+            ? datasetResults[0].value.items
+            : []) || [];
+        const generalItems =
+          (datasetResults[1].status === "fulfilled"
+            ? datasetResults[1].value.items
+            : []) || [];
+
+        console.log(
+          `[Apify] Received ${reelItems.length} Reels and ${generalItems.length} general items`,
+        );
 
         if (reelItems.length === 0 && generalItems.length === 0) {
-          return reply.status(404).send({ error: "No posts found for this handle using both scrapers." });
+          return reply
+            .status(404)
+            .send({
+              error: "No posts found for this handle using both scrapers.",
+            });
         }
 
         // Merge results: Use general as base, overlay with reel-specific high-detail metrics
         const mergedMap = new Map();
-        
+
         // Add general items
         generalItems.forEach((item: any) => {
           if (!item) return;
@@ -1279,7 +1453,7 @@ export async function scraperRoutes(fastify: FastifyInstance) {
           if (!reel) return;
           const id = reel.id || reel.shortCode;
           if (!id) return;
-          
+
           const existing = mergedMap.get(String(id));
           if (existing) {
             // Merge: priority to reel metrics
@@ -1300,64 +1474,92 @@ export async function scraperRoutes(fastify: FastifyInstance) {
         const followers = profile.followers || 1;
 
         // Parallelize media downloads and DB upserts for all items simultaneously
-        const postsResults = await Promise.allSettled(finalItems.map(async (item: any) => {
-          try {
-            const likesCount = item.likesCount || 0;
-            const commentsCount = item.commentsCount || 0;
-            const shared = item.sharesCount || item.reelShareCount || 0;
-            const reposts = item.reshareCount || 0;
-            
-            const er = ((likesCount + commentsCount + shared + reposts) / followers) * 100;
-            
-            const displayUrl = item.displayUrl || (item.images && item.images[0]) || "";
-            const localMediaUrl = await downloadPostMedia(displayUrl, String(item.id || item.shortCode), platform, request);
+        const postsResults = await Promise.allSettled(
+          finalItems.map(async (item: any) => {
+            try {
+              const likesCount = item.likesCount || 0;
+              const commentsCount = item.commentsCount || 0;
+              const shared = item.sharesCount || item.reelShareCount || 0;
+              const reposts = item.reshareCount || 0;
 
-            const postData = {
-              postId: String(item.id || item.shortCode),
-              url: item.url || `https://www.instagram.com/p/${item.shortCode}/`,
-              type: item.type || (item.videoPlayCount || item.videoViewCount ? "Video" : "Image"),
-              displayUrl: localMediaUrl,
-              caption: item.caption || "",
-              timestamp: item.timestamp ? new Date(item.timestamp) : new Date(),
-              likesCount,
-              commentsCount,
-              reposts, 
-              shared, 
-              viewsCount: item.videoPlayCount || item.videoViewCount || item.viewCount || 0,
-              er: parseFloat(er.toFixed(4)),
-              hashtags: item.hashtags || [],
-              profileId: profile.id
-            };
+              const er =
+                ((likesCount + commentsCount + shared + reposts) / followers) *
+                100;
 
-            // Save to DB
-            await prisma.socmedPost.upsert({
-              where: {
-                postId_profileId: {
-                  postId: postData.postId,
-                  profileId: profile.id
-                }
-              },
-              update: postData,
-              create: postData
-            });
+              const displayUrl =
+                item.displayUrl || (item.images && item.images[0]) || "";
+              const localMediaUrl = await downloadPostMedia(
+                displayUrl,
+                String(item.id || item.shortCode),
+                platform,
+                request,
+              );
 
-            return postData;
-          } catch (itemErr) {
-            console.warn(`[Apify] Error processing item ${item?.id}:`, itemErr);
-            return null;
-          }
-        }));
+              const postData = {
+                postId: String(item.id || item.shortCode),
+                url:
+                  item.url || `https://www.instagram.com/p/${item.shortCode}/`,
+                type:
+                  item.type ||
+                  (item.videoPlayCount || item.videoViewCount
+                    ? "Video"
+                    : "Image"),
+                displayUrl: localMediaUrl,
+                caption: item.caption || "",
+                timestamp: item.timestamp
+                  ? new Date(item.timestamp)
+                  : new Date(),
+                likesCount,
+                commentsCount,
+                reposts,
+                shared,
+                viewsCount:
+                  item.videoPlayCount ||
+                  item.videoViewCount ||
+                  item.viewCount ||
+                  0,
+                er: parseFloat(er.toFixed(4)),
+                hashtags: item.hashtags || [],
+                profileId: profile.id,
+              };
+
+              // Save to DB
+              await prisma.socmedPost.upsert({
+                where: {
+                  postId_profileId: {
+                    postId: postData.postId,
+                    profileId: profile.id,
+                  },
+                },
+                update: postData,
+                create: postData,
+              });
+
+              return postData;
+            } catch (itemErr) {
+              console.warn(
+                `[Apify] Error processing item ${item?.id}:`,
+                itemErr,
+              );
+              return null;
+            }
+          }),
+        );
 
         const posts = postsResults
-          .filter((res): res is PromiseFulfilledResult<any> => res.status === 'fulfilled' && res.value !== null)
-          .map(res => res.value);
+          .filter(
+            (res): res is PromiseFulfilledResult<any> =>
+              res.status === "fulfilled" && res.value !== null,
+          )
+          .map((res) => res.value);
 
-        return reply.status(200).send({ 
+        return reply.status(200).send({
           handle: normalizedHandle,
           platform,
-          posts: posts.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()).map((p, i) => ({ ...p, no: i + 1 }))
+          posts: posts
+            .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+            .map((p, i) => ({ ...p, no: i + 1 })),
         });
-
       } catch (error: any) {
         console.error("Socmed Detail Error:", error);
         return reply.status(500).send({
@@ -1365,6 +1567,6 @@ export async function scraperRoutes(fastify: FastifyInstance) {
           message: error.message,
         });
       }
-    }
+    },
   );
 }

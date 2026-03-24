@@ -1,6 +1,9 @@
-import { prisma } from '../../lib/prisma';
-import OpenAI from 'openai';
-import { detectPromptInjection, sanitizePlainText } from '../../middlewares/sanitize';
+import { prisma } from "../../lib/prisma";
+import OpenAI from "openai";
+import {
+  detectPromptInjection,
+  sanitizePlainText,
+} from "../../middlewares/sanitize";
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
@@ -29,7 +32,7 @@ ATURAN KETAT:
  */
 export async function generateEmbedding(text: string): Promise<number[]> {
   const response = await openai.embeddings.create({
-    model: 'text-embedding-3-small',
+    model: "text-embedding-3-small",
     input: text,
   });
   return response.data[0].embedding;
@@ -49,7 +52,10 @@ async function retrieveRelevantContext(question: string): Promise<string> {
   });
 
   // Simple keyword match (replace with cosine similarity via pgvector)
-  const keywords = question.toLowerCase().split(' ').filter((w) => w.length > 3);
+  const keywords = question
+    .toLowerCase()
+    .split(" ")
+    .filter((w) => w.length > 3);
   const scored = allKnowledge.map((kb: any) => {
     const combined = `${kb.title} ${kb.content}`.toLowerCase();
     const score = keywords.filter((kw) => combined.includes(kw)).length;
@@ -61,8 +67,8 @@ async function retrieveRelevantContext(question: string): Promise<string> {
     .slice(0, 5)
     .filter((k: any) => k.score > 0);
 
-  if (top.length === 0) return 'Tidak ada informasi yang relevan ditemukan.';
-  return top.map((k: any) => `${k.title}:\n${k.content}`).join('\n\n');
+  if (top.length === 0) return "Tidak ada informasi yang relevan ditemukan.";
+  return top.map((k: any) => `${k.title}:\n${k.content}`).join("\n\n");
 }
 
 interface ChatbotInput {
@@ -77,29 +83,37 @@ interface ChatbotOutput {
   tokens?: number;
 }
 
-export async function processChatbotQuestion(input: ChatbotInput): Promise<ChatbotOutput> {
+export async function processChatbotQuestion(
+  input: ChatbotInput,
+): Promise<ChatbotOutput> {
   const cleanQuestion = sanitizePlainText(input.question);
 
   // Prompt injection check
   if (detectPromptInjection(cleanQuestion)) {
-    return { answer: 'Maaf, pertanyaan Anda tidak dapat diproses.', sessionId: input.sessionId };
+    return {
+      answer: "Maaf, pertanyaan Anda tidak dapat diproses.",
+      sessionId: input.sessionId,
+    };
   }
 
   const context = await retrieveRelevantContext(cleanQuestion);
 
   const completion = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    //model: 'gpt-4o',
+    model: "gpt-5.2",
     max_tokens: 300,
     messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: "system", content: SYSTEM_PROMPT },
       {
-        role: 'user',
+        role: "user",
         content: `[KONTEKS]\n${context}\n\n[PERTANYAAN]\n${cleanQuestion}`,
       },
     ],
   });
 
-  const answer = completion.choices[0]?.message?.content || 'Maaf, saya tidak dapat memberikan jawaban saat ini.';
+  const answer =
+    completion.choices[0]?.message?.content ||
+    "Maaf, saya tidak dapat memberikan jawaban saat ini.";
   const tokens = completion.usage?.total_tokens;
 
   // Log to database
