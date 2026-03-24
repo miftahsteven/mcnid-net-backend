@@ -99,8 +99,8 @@ export async function processChatbotQuestion(
   const context = await retrieveRelevantContext(cleanQuestion);
 
   const completion = await openai.chat.completions.create({
-    //model: 'gpt-4o',
-    model: "gpt-5.2",
+    model: "gpt-4o",
+    //model: "gpt-5.2",
     max_tokens: 300,
     messages: [
       { role: "system", content: SYSTEM_PROMPT },

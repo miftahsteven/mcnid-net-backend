@@ -360,8 +360,8 @@ export async function scraperRoutes(fastify: FastifyInstance) {
 
             const completion = await openai.chat.completions.create({
               //model: "gpt-4o-mini",
-              //model: "gpt-4o-mini",
-              model: "gpt-5.1",
+              model: "gpt-4o",
+              //model: "gpt-5.2",
               messages: [
                 {
                   role: "system",
@@ -536,7 +536,8 @@ export async function scraperRoutes(fastify: FastifyInstance) {
               : "";
 
             const completion = await openai.chat.completions.create({
-              model: "gpt-4o-mini",
+              model: "gpt-4o",
+              //model: "gpt-5.2",
               messages: [
                 {
                   role: "system",
@@ -765,7 +766,8 @@ export async function scraperRoutes(fastify: FastifyInstance) {
                     // 1. Content Sentiment
                     const sentimentCompletion =
                       await openai.chat.completions.create({
-                        model: "gpt-4o-mini",
+                        model: "gpt-4o",
+                        //model: "gpt-5.2",
                         messages: [
                           {
                             role: "system",
@@ -812,7 +814,8 @@ export async function scraperRoutes(fastify: FastifyInstance) {
                         commentData.comments.map(async (c: any) => {
                           try {
                             const comp = await openai.chat.completions.create({
-                              model: "gpt-4o-mini",
+                              model: "gpt-4o",
+                              //model: "gpt-5.2",
                               messages: [
                                 {
                                   role: "system",
@@ -1342,12 +1345,9 @@ export async function scraperRoutes(fastify: FastifyInstance) {
         });
 
         if (!profile) {
-          return reply
-            .status(404)
-            .send({
-              error:
-                "Profile analysis not found. Please analyze profile first.",
-            });
+          return reply.status(404).send({
+            error: "Profile analysis not found. Please analyze profile first.",
+          });
         }
 
         if (profile.isPrivate) {
@@ -1431,11 +1431,9 @@ export async function scraperRoutes(fastify: FastifyInstance) {
         );
 
         if (reelItems.length === 0 && generalItems.length === 0) {
-          return reply
-            .status(404)
-            .send({
-              error: "No posts found for this handle using both scrapers.",
-            });
+          return reply.status(404).send({
+            error: "No posts found for this handle using both scrapers.",
+          });
         }
 
         // Merge results: Use general as base, overlay with reel-specific high-detail metrics
