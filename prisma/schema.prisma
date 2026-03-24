@@ -444,3 +444,55 @@ model SocmedPost {
   @@unique([postId, profileId])
   @@map("socmed_posts")
 }
+
+model SnaUserNode {
+  id            String   @id
+  username      String
+  followers     Int?
+  createdAt     DateTime @default(now())
+  interactionsAsSource SnaInteraction[] @relation("sourceUser")
+  interactionsAsTarget SnaInteraction[] @relation("targetUser")
+
+  @@map("sna_user_nodes")
+}
+
+model SnaTweet {
+  id            String   @id
+  text          String   @db.Text
+  createdAt     DateTime
+  userId        String
+  snaResultId   String
+  snaResult     SnaResult @relation(fields: [snaResultId], references: [id], onDelete: Cascade)
+
+  @@map("sna_tweets")
+}
+
+model SnaInteraction {
+  id            String   @id @default(uuid())
+  sourceUserId  String
+  targetUserId  String
+  type          String   // retweet | reply | mention
+  tweetId       String
+  createdAt     DateTime @default(now())
+  snaResultId   String
+  snaResult     SnaResult @relation(fields: [snaResultId], references: [id], onDelete: Cascade)
+  
+  sourceUser    SnaUserNode @relation("sourceUser", fields: [sourceUserId], references: [id])
+  targetUser    SnaUserNode @relation("targetUser", fields: [targetUserId], references: [id])
+
+  @@map("sna_interactions")
+}
+
+model SnaResult {
+  id            String   @id @default(uuid())
+  keyword       String
+  totalNodes    Int
+  totalEdges    Int
+  graphData     Json?    // Store the processed graph for quick retrieval
+  analytics     Json?    // Store centrality/community results
+  createdAt     DateTime @default(now())
+  tweets        SnaTweet[]
+  interactions  SnaInteraction[]
+
+  @@map("sna_results")
+}

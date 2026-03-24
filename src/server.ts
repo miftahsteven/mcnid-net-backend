@@ -22,6 +22,7 @@ import { categoriesRoutes } from './routes/categories.route';
 import { videosRoutes } from './routes/videos.route';
 import { coursesRoutes } from './routes/courses.route';
 import { scraperRoutes } from './routes/scraper.route';
+import { snaRoutes } from './modules/sna/sna.route';
 import { highlightsRoutes } from './routes/highlights.route';
 import { latestRoutes } from './routes/latest.route';
 import { latestPostsRoutes } from './routes/latest-posts.route';
@@ -89,6 +90,7 @@ async function bootstrap() {
   await server.register(videosRoutes, { prefix: '/api/videos' });
   await server.register(coursesRoutes, { prefix: '/api/courses' });
   await server.register(scraperRoutes, { prefix: '/api/scraper' });
+  await server.register(snaRoutes, { prefix: '/api/sna' });
   await server.register(highlightsRoutes, { prefix: '/api/highlights' });
   await server.register(latestRoutes, { prefix: '/api/latest' });
   await server.register(latestPostsRoutes, { prefix: '/api/latest-posts' });

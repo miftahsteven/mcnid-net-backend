@@ -1016,7 +1016,11 @@ export async function scraperRoutes(fastify: FastifyInstance) {
             totalComments += post.commentsCount || 0;
             
             // Calculate ER per post and cap at 100%
-            const postEngagements = (post.likesCount || 0) + (post.commentsCount || 0);
+            const postEngagements = 
+                (post.likesCount || 0) + 
+                (post.commentsCount || 0) + 
+                (post.sharesCount || post.reelShareCount || post.shareCount || 0) +
+                (post.reshareCount || post.repostsCount || 0);
             const postEr = followers > 0 ? (postEngagements / followers) * 100 : 0;
             trendData.push(Number(postEr.toFixed(2)));
         }
@@ -1214,77 +1218,150 @@ export async function scraperRoutes(fastify: FastifyInstance) {
           }
         }
 
-        // 3. Scrap posts with Apify
-        const actorId = "apify/instagram-scraper";
-        const input = {
-          directUrls: [`https://www.instagram.com/${normalizedHandle.replace('@', '')}`],
-          resultsLimit: 20,
-          resultsType: "posts",
-          proxy: {
-            useApifyProxy: true,
-            apifyProxyGroups: ["RESIDENTIAL"]
-          }
-        };
+        // 3. Hybrid Scraping Logic (Reels + General Posts)
+        const username = normalizedHandle.replace('@', '');
+        
+        console.log(`[Apify] Starting hybrid scrape for ${normalizedHandle}`);
+        
+        // Use allSettled so one failure doesn't kill the whole process
+        const results = await Promise.allSettled([
+          apifyClient.actor("apify/instagram-reel-scraper").call({
+            username: [username],
+            resultsLimit: 20,
+            includeSharesCount: true,
+            includeDownloadedVideo: false,
+            includeTranscript: false,
+            skipPinnedPosts: false,
+          }),
+          apifyClient.actor("apify/instagram-scraper").call({
+            directUrls: [`https://www.instagram.com/${username}`],
+            resultsLimit: 20,
+            resultsType: "posts",
+            proxy: { useApifyProxy: true, apifyProxyGroups: ["RESIDENTIAL"] }
+          })
+        ]);
 
-        console.log(`[Apify] Scraping detailed posts for ${normalizedHandle}`);
-        const run = await apifyClient.actor(actorId).call(input);
-        const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
+        const reelRunTask = results[0].status === 'fulfilled' ? results[0].value : null;
+        const generalRunTask = results[1].status === 'fulfilled' ? results[1].value : null;
 
-        const posts = [];
-        for (const item of (items as any[])) {
-          const likes = item.likesCount || 0;
-          const comments = item.commentsCount || 0;
-          const followers = profile.followers || 1;
-          const er = ((likes + comments) / followers) * 100;
-          
-          // Persistent Media
-          const localMediaUrl = await downloadPostMedia(item.displayUrl, item.id, platform, request);
-
-          const postData = {
-            postId: item.id,
-            url: item.url,
-            type: item.type || "Image",
-            displayUrl: localMediaUrl,
-            caption: item.caption || "",
-            timestamp: new Date(item.timestamp),
-            likesCount: likes,
-            commentsCount: comments,
-            reposts: item.reshareCount || 0, 
-            shared: 0, 
-            viewsCount: item.videoPlayCount || 0,
-            er: parseFloat(er.toFixed(4)),
-            hashtags: item.hashtags || [],
-            profileId: profile.id
-          };
-
-          // Save to DB
-          await prisma.socmedPost.upsert({
-            where: {
-              postId_profileId: {
-                postId: item.id,
-                profileId: profile.id
-              }
-            },
-            update: postData,
-            create: postData
-          });
-
-          posts.push(postData);
+        if (!reelRunTask && !generalRunTask) {
+          throw new Error("Both Instagram scrapers failed to start. Please check your Apify quota or connection.");
         }
 
-        // Final sorting
-        posts.sort((a,b) => b.timestamp.getTime() - a.timestamp.getTime());
+        // Fetch datasets
+        console.log(`[Apify] Fetching datasets (Reel: ${!!reelRunTask}, General: ${!!generalRunTask})`);
+        const datasetResults = await Promise.allSettled([
+          reelRunTask ? apifyClient.dataset(reelRunTask.defaultDatasetId).listItems() : Promise.reject("No Reel Task"),
+          generalRunTask ? apifyClient.dataset(generalRunTask.defaultDatasetId).listItems() : Promise.reject("No General Task")
+        ]);
+
+        const reelItems = (datasetResults[0].status === 'fulfilled' ? datasetResults[0].value.items : []) || [];
+        const generalItems = (datasetResults[1].status === 'fulfilled' ? datasetResults[1].value.items : []) || [];
+        
+        console.log(`[Apify] Received ${reelItems.length} Reels and ${generalItems.length} general items`);
+
+        if (reelItems.length === 0 && generalItems.length === 0) {
+          return reply.status(404).send({ error: "No posts found for this handle using both scrapers." });
+        }
+
+        // Merge results: Use general as base, overlay with reel-specific high-detail metrics
+        const mergedMap = new Map();
+        
+        // Add general items
+        generalItems.forEach((item: any) => {
+          if (!item) return;
+          const id = item.id || item.shortCode;
+          if (id) mergedMap.set(String(id), item);
+        });
+
+        // Overlay with reel items (usually have more metrics like shared)
+        reelItems.forEach((reel: any) => {
+          if (!reel) return;
+          const id = reel.id || reel.shortCode;
+          if (!id) return;
+          
+          const existing = mergedMap.get(String(id));
+          if (existing) {
+            // Merge: priority to reel metrics
+            mergedMap.set(String(id), { ...existing, ...reel });
+          } else {
+            mergedMap.set(String(id), reel);
+          }
+        });
+
+        const finalItems = Array.from(mergedMap.values())
+          .sort((a: any, b: any) => {
+            const dateA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+            const dateB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+            return dateB - dateA;
+          })
+          .slice(0, 20);
+
+        const followers = profile.followers || 1;
+
+        // Parallelize media downloads and DB upserts for all items simultaneously
+        const postsResults = await Promise.allSettled(finalItems.map(async (item: any) => {
+          try {
+            const likesCount = item.likesCount || 0;
+            const commentsCount = item.commentsCount || 0;
+            const shared = item.sharesCount || item.reelShareCount || 0;
+            const reposts = item.reshareCount || 0;
+            
+            const er = ((likesCount + commentsCount + shared + reposts) / followers) * 100;
+            
+            const displayUrl = item.displayUrl || (item.images && item.images[0]) || "";
+            const localMediaUrl = await downloadPostMedia(displayUrl, String(item.id || item.shortCode), platform, request);
+
+            const postData = {
+              postId: String(item.id || item.shortCode),
+              url: item.url || `https://www.instagram.com/p/${item.shortCode}/`,
+              type: item.type || (item.videoPlayCount || item.videoViewCount ? "Video" : "Image"),
+              displayUrl: localMediaUrl,
+              caption: item.caption || "",
+              timestamp: item.timestamp ? new Date(item.timestamp) : new Date(),
+              likesCount,
+              commentsCount,
+              reposts, 
+              shared, 
+              viewsCount: item.videoPlayCount || item.videoViewCount || item.viewCount || 0,
+              er: parseFloat(er.toFixed(4)),
+              hashtags: item.hashtags || [],
+              profileId: profile.id
+            };
+
+            // Save to DB
+            await prisma.socmedPost.upsert({
+              where: {
+                postId_profileId: {
+                  postId: postData.postId,
+                  profileId: profile.id
+                }
+              },
+              update: postData,
+              create: postData
+            });
+
+            return postData;
+          } catch (itemErr) {
+            console.warn(`[Apify] Error processing item ${item?.id}:`, itemErr);
+            return null;
+          }
+        }));
+
+        const posts = postsResults
+          .filter((res): res is PromiseFulfilledResult<any> => res.status === 'fulfilled' && res.value !== null)
+          .map(res => res.value);
 
         return reply.status(200).send({ 
           handle: normalizedHandle,
           platform,
-          posts: posts.map((p, i) => ({ ...p, no: i + 1 }))
+          posts: posts.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime()).map((p, i) => ({ ...p, no: i + 1 }))
         });
 
       } catch (error: any) {
         console.error("Socmed Detail Error:", error);
         return reply.status(500).send({
-          error: "Failed to run socmed detail report",
+          error: "Failed to run hybrid socmed detail report",
           message: error.message,
         });
       }
