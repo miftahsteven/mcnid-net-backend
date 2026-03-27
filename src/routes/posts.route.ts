@@ -56,6 +56,25 @@ export async function postsRoutes(fastify: FastifyInstance) {
     }
   });
 
+  // GET single post by slug using QUERY PARAM — bypasses maxParamLength restriction
+  fastify.get('/by-slug', {
+    preHandler: [internalApiMiddleware],
+    handler: async (request: FastifyRequest<{ Querystring: { slug: string } }>, reply: FastifyReply) => {
+      const slug = (request.query as any).slug;
+      if (!slug) return reply.status(400).send({ error: 'Missing slug query parameter' });
+      const post = await prisma.post.findUnique({
+        where: { slug },
+        include: {
+          author: { select: { name: true, image: true } },
+          categories: { select: { category: true } },
+          tags: { select: { tag: true } },
+        },
+      });
+      if (!post) return reply.status(404).send({ error: 'Post not found' });
+      return reply.send({ data: post });
+    }
+  });
+
   // GET single post by slug (internal / Next.js SSR)
   fastify.get('/:slug', {
     preHandler: [internalApiMiddleware],
