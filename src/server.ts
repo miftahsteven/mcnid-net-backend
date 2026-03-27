@@ -33,7 +33,10 @@ import { trendingRoutes } from './routes/trending.route';
 import { indeksRoutes } from './routes/indeks.route';
 import { prisma } from './lib/prisma';
 
-const server = Fastify({ logger: true });
+const server = Fastify({ 
+  logger: true,
+  maxParamLength: 500
+});
 
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:3002').split(',');
 const PORT = Number(process.env.PORT) || 4000;
