@@ -18,6 +18,7 @@
     "@fastify/multipart": "^9.4.0",
     "@fastify/rate-limit": "^10.3.0",
     "@fastify/static": "^9.0.0",
+    "@google-analytics/data": "^5.2.1",
     "@prisma/client": "^5.10.0",
     "@types/bcryptjs": "^2.4.6",
     "apify-client": "^2.22.3",
