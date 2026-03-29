@@ -70,6 +70,7 @@ async function getCommentsForUrl(
   stats?: { likes: number; retweets: number; replies: number };
   postUsername?: string;
   postIsVerified?: boolean;
+  publishedAt?: string;
 }> {
   try {
     let actorId = "";
@@ -77,30 +78,22 @@ async function getCommentsForUrl(
 
     switch (platformKey) {
       case "facebook":
-        actorId = "datavoyantlab/facebook-comments-scraper";
+        actorId = "apify/facebook-comments-scraper";
         let fbUrl = url;
         try {
           const u = new URL(url);
           if (
             u.hostname.endsWith("facebook.com") &&
-            u.hostname !== "www.facebook.com" &&
-            u.hostname !== "web.facebook.com"
+            u.hostname !== "www.facebook.com"
           ) {
-            u.hostname = "web.facebook.com"; // datavoyantlab scraper works well with web.facebook.com
+            u.hostname = "www.facebook.com";
           }
           fbUrl = u.toString();
         } catch (e) {}
         input = {
-          max_items: 50,
-          max_delay: 5,
-          min_delay: 2,
-          proxy: {
-            useApifyProxy: true,
-            apifyProxyGroups: ["RESIDENTIAL"],
-            apifyProxyCountry: "ID",
-          },
-          sort_type: "newest",
-          url: fbUrl,
+          startUrls: [{ url: fbUrl }],
+          resultsLimit: 20,
+          maxComments: 20,
         };
         break;
       case "instagram":
@@ -217,27 +210,41 @@ async function getCommentsForUrl(
       `[Apify] Extracted ${comments.length} comments for URL: ${url}`,
     );
 
-    let stats, postUsername, postIsVerified;
-    if (platformKey === "x" && items.length > 0) {
-      // Find the main tweet or just use the first one if we can't reliably match the URL
-      const mainItem =
-        (items as any[]).find((i) => i.url === url || i.twitterUrl === url) ||
-        items[0];
+    let stats, postUsername, postIsVerified, publishedAt;
+    if (items.length > 0) {
+      const mainItem = (items as any[]).find(i => 
+         (i.url === url || i.twitterUrl === url || i.shortCode && url.includes(i.shortCode))
+      ) || items[0];
+
       if (mainItem) {
-        stats = {
-          likes: mainItem.likeCount || mainItem.favorite_count || 0,
-          retweets: mainItem.retweetCount || mainItem.retweet_count || 0,
-          replies: mainItem.replyCount || mainItem.reply_count || 0,
-        };
-        postIsVerified = mainItem.user?.verified || false;
-        if (!postUsername && mainItem.user?.screen_name)
-          postUsername = "@" + mainItem.user.screen_name;
+        // Extract stats
+        if (platformKey === "x") {
+          stats = {
+            likes: mainItem.likeCount || mainItem.favorite_count || 0,
+            retweets: mainItem.retweetCount || mainItem.retweet_count || 0,
+            replies: mainItem.replyCount || mainItem.reply_count || 0,
+          };
+          postIsVerified = mainItem.user?.verified || false;
+          if (!postUsername && mainItem.user?.screen_name)
+            postUsername = "@" + mainItem.user.screen_name;
+          publishedAt = mainItem.created_at || mainItem.timestamp;
+        } else if (platformKey === "instagram") {
+          stats = {
+             likes: mainItem.likesCount || 0,
+             replies: mainItem.commentsCount || 0,
+             retweets: 0
+          };
+          postUsername = mainItem.ownerUsername || mainItem.ownerFullName;
+          publishedAt = mainItem.timestamp || mainItem.latestComments?.timestamp;
+        } else if (platformKey === "facebook") {
+           publishedAt = mainItem.date || mainItem.timestamp;
+        } else if (platformKey === "tiktok") {
+           publishedAt = mainItem.createTime;
+        }
       }
-    } else if (platformKey === "tiktok" && items.length > 0) {
-      // Sometimes tiktok actor returns video stats in the first item or a specific format, but typically it's for comments
     }
 
-    return { comments: comments as any[], stats, postUsername, postIsVerified };
+    return { comments: comments as any[], stats, postUsername, postIsVerified, publishedAt };
   } catch (error: any) {
     console.error(`[Apify Error on ${url}]:`, error?.message || error);
     return { comments: [], error: "Scraping komentar tidak diizinkan" };
@@ -252,6 +259,9 @@ export async function scraperRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
+        const { query } = (request.body as { query?: string }) || {};
+        const searchQuery = query?.trim() || "berita terkini islami";
+
         const dateFrom = new Date();
         dateFrom.setDate(dateFrom.getDate() - 8);
         const dateFromStr = dateFrom.toISOString().split("T")[0];
@@ -280,7 +290,7 @@ export async function scraperRoutes(fastify: FastifyInstance) {
               returnImages: false,
               returnRelatedQuestions: false,
             },
-            queries: "cholil nafis",
+            queries: searchQuery,
             resultsPerPage: 100,
             saveHtml: false,
             saveHtmlToKeyValueStore: false,
@@ -311,15 +321,12 @@ export async function scraperRoutes(fastify: FastifyInstance) {
           text: res.description,
         }));
 
-        // 2. Filter internal duplicates and allowed sources
+        // 2. Filter internal duplicates
         const seenTitles = new Set<string>();
         let filteredItems = newsItems.filter((item) => {
           if (!item.title || !item.sourceUrl) return false;
 
-          const isAllowed = allowedSources.some((source) =>
-            item.sourceUrl.includes(source),
-          );
-          if (!isAllowed) return false;
+          // Hapus filter allowedSources agar bisa mengambil dari semua web
 
           // Internal Deduplicator
           if (seenTitles.has(item.title.toLowerCase())) return false;
@@ -370,7 +377,7 @@ export async function scraperRoutes(fastify: FastifyInstance) {
                 },
                 {
                   role: "user",
-                  content: `Buatkan artikel berita lengkap tentang tokoh "Cholil Nafis" berdasarkan metadata berikut:\n\nJudul: ${item.title}\nSumber: ${item.source}\nLink Referensi: ${item.link}${promptContext}\n\nBerikan response HANYA DALAM BENTUK JSON yang valid persis dengan struktur berikut:\n{\n  "content": "string html artikel lengkap (minimal 3 paragraf)",\n  "excerpt": "string ringkasan singkat maksimal 250 karakter"\n}`,
+                  content: `Buatkan artikel berita/konten utuh berdasarkan keyword pencarian "${searchQuery}" dari metadata berikut:\n\nJudul: ${item.title}\nSumber: ${item.source}\nLink Referensi: ${item.link}${promptContext}\n\nBerikan response HANYA DALAM BENTUK JSON yang valid persis dengan struktur berikut:\n{\n  "content": "string html artikel lengkap (minimal 3 paragraf)",\n  "excerpt": "string ringkasan singkat maksimal 250 karakter"\n}`,
                 },
               ],
               response_format: { type: "json_object" },
@@ -434,6 +441,8 @@ export async function scraperRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
+        const { query } = (request.body as { query?: string }) || {};
+        const searchQuery = query?.trim() || "berita terkini islami";
         const dateFrom = new Date();
         dateFrom.setDate(dateFrom.getDate() - 8);
         const dateFromStr = dateFrom.toISOString().split("T")[0];
@@ -462,7 +471,7 @@ export async function scraperRoutes(fastify: FastifyInstance) {
               returnImages: false,
               returnRelatedQuestions: false,
             },
-            queries: "cholil nafis site:youtube.com",
+            queries: `${searchQuery} site:youtube.com`,
             resultsPerPage: 100,
             saveHtml: false,
             saveHtmlToKeyValueStore: false,
@@ -546,7 +555,7 @@ export async function scraperRoutes(fastify: FastifyInstance) {
                 },
                 {
                   role: "user",
-                  content: `Buatkan deskripsi video YouTube tentang tokoh "Cholil Nafis" berdasarkan metadata berikut:\n\nJudul: ${item.title}\nSumber: ${item.source}\nLink Referensi: ${item.link}${promptContext}\n\nBerikan response HANYA DALAM BENTUK JSON yang valid persis dengan struktur berikut:\n{\n  "description": "string html deskripsi lengkap video"\n}`,
+                  content: `Buatkan deskripsi video YouTube yang berkaitan dengan topik/keyword "${searchQuery}" dari metadata berikut:\n\nJudul: ${item.title}\nSumber: ${item.source}\nLink Referensi: ${item.link}${promptContext}\n\nBerikan response HANYA DALAM BENTUK JSON yang valid persis dengan struktur berikut:\n{\n  "description": "string html deskripsi lengkap video"\n}`,
                 },
               ],
               response_format: { type: "json_object" },
@@ -608,20 +617,28 @@ export async function scraperRoutes(fastify: FastifyInstance) {
     },
     async (request: FastifyRequest, reply: FastifyReply) => {
       try {
-        const { query, forceRegenerate = false } = request.body as {
+        const { query, forceRegenerate = false, dateFrom = "", dateTo = "" } = request.body as {
           query: string;
           forceRegenerate?: boolean;
+          dateFrom?: string;
+          dateTo?: string;
         };
         if (!query) {
           return reply.status(400).send({ error: "Missing query" });
         }
 
-        const dateFrom = new Date();
-        dateFrom.setDate(dateFrom.getDate() - 7);
-        const dateFromStr = dateFrom.toISOString().split("T")[0];
+        let dateFromStr = dateFrom;
+        if (!dateFromStr) {
+          const df = new Date();
+          df.setDate(df.getDate() - 7);
+          dateFromStr = df.toISOString().split("T")[0];
+        }
 
-        const dateTo = new Date();
-        const dateToStr = dateTo.toISOString().split("T")[0];
+        let dateToStr = dateTo;
+        if (!dateToStr) {
+          const dt = new Date();
+          dateToStr = dt.toISOString().split("T")[0];
+        }
 
         // CHECK CACHE
         if (!forceRegenerate) {
@@ -646,9 +663,9 @@ export async function scraperRoutes(fastify: FastifyInstance) {
         const platforms = [
           {
             key: "web",
-            name: "Web (Media Nasional)",
+            name: "Web (Semua Website)",
             querySuffix:
-              " (site:kompas.com OR site:detik.com OR site:tempo.co OR site:cnnindonesia.com OR site:republika.co.id OR site:antaranews.com OR site:viva.co.id OR site:suara.com OR site:merdeka.com OR site:liputan6.com OR site:tribunnews.com)",
+              " -site:facebook.com -site:twitter.com -site:x.com -site:instagram.com -site:tiktok.com -site:threads.net -site:youtube.com",
           },
           {
             key: "facebook",
@@ -707,7 +724,7 @@ export async function scraperRoutes(fastify: FastifyInstance) {
                   rawResults.length;
               }
 
-              const topResults = rawResults.slice(0, 25).map((res: any) => {
+              const topResults = rawResults.slice(0, 50).map((res: any) => {
                 let mediaName = undefined;
                 let mediaLogo = undefined;
                 let postUsername = undefined;
@@ -749,6 +766,24 @@ export async function scraperRoutes(fastify: FastifyInstance) {
                   }
                 } catch (e) {}
 
+                // Relevance Matching Logic
+                const matchQuery = query.toLowerCase().replace(/["']/g, "");
+                const titleLower = res.title?.toLowerCase() || "";
+                const snippetLower = res.description?.toLowerCase() || "";
+                let matchRelevance = "";
+                
+                const words = matchQuery.split(" ").filter(Boolean);
+                const isExact = matchQuery && (titleLower.includes(matchQuery) || snippetLower.includes(matchQuery));
+                
+                if (isExact) {
+                   matchRelevance = `Ada kata "${matchQuery}" di konten ini (Utuh)`;
+                } else {
+                   const foundWords = words.filter(w => titleLower.includes(w) || snippetLower.includes(w));
+                   if (foundWords.length > 0) {
+                      matchRelevance = `Ada kata ${foundWords.map(w => `"${w}"`).join(", ")} di konten ini`;
+                   }
+                }
+
                 return {
                   title: res.title,
                   link: res.url,
@@ -756,23 +791,39 @@ export async function scraperRoutes(fastify: FastifyInstance) {
                   mediaName,
                   mediaLogo,
                   postUsername,
+                  matchRelevance,
+                  publishedAt: res.date || null,
                 };
               });
 
-              // Sentiment analysis in parallel for these top results using OpenAI
-              const analyzedResults = await Promise.all(
-                topResults.map(async (item) => {
+              // --- UTILITY FOR BATCHING ---
+              const runInBatches = async (items: any[], batchSize: number, processor: (item: any) => Promise<any>) => {
+                const results = [];
+                for (let i = 0; i < items.length; i += batchSize) {
+                  const batch = items.slice(i, i + batchSize);
+                  const batchResults = await Promise.all(batch.map(processor));
+                  results.push(...batchResults);
+                }
+                return results;
+              };
+
+              // Sentiment analysis in batches for these top results using OpenAI
+              const analyzedResults = await runInBatches(topResults, 5, async (item) => {
                   try {
-                    // 1. Content Sentiment
+                    // 1. Content Sentiment (Sharpened with "Marah")
                     const sentimentCompletion =
                       await openai.chat.completions.create({
                         model: "gpt-4o",
-                        //model: "gpt-5.2",
                         messages: [
                           {
                             role: "system",
-                            content:
-                              "Anda adalah analis sentimen media. Tentukan sentimen (Positif, Netral, Negatif) dari judul/konten berikut. Jawab hanya dengan satu kata: Positif, Netral, atau Negatif.",
+                            content: `Anda adalah analis sentimen media cerdas. Evaluasi secara menyeluruh konteks, arah narasi, baik dari baris Judul maupun Snippet. 
+                            Kriteria Penilaian:
+                            - POSITIVE: mayoritas berisi apresiasi, semangat, dukungan, cinta.
+                            - NEGATIVE: berisi kritik, kekecewaan, sarkasme, atau isu sensitif.
+                            - NEUTRAL: bersifat informatif, formal, atau tidak menunjukkan emosi jelas.
+                            - MARAH: bersifat kasar, emosional tinggi, berisi kata-kata kasar/makian.
+                            Jawab HANYA dengan satu kata: Positif, Netral, Negatif, atau Marah.`,
                           },
                           {
                             role: "user",
@@ -780,6 +831,7 @@ export async function scraperRoutes(fastify: FastifyInstance) {
                           },
                         ],
                         max_tokens: 10,
+                        temperature: 0.1,
                       });
 
                     const contentSentiment =
@@ -798,6 +850,7 @@ export async function scraperRoutes(fastify: FastifyInstance) {
                       Positif: 0,
                       Netral: 0,
                       Negatif: 0,
+                      Marah: 0
                     };
                     let analyzedComments: {
                       text: string;
@@ -807,32 +860,55 @@ export async function scraperRoutes(fastify: FastifyInstance) {
                       likes: number;
                       profileUrl?: string;
                       profileImageUrl?: string;
+                      matchRelevance?: string;
                     }[] = [];
 
                     if (commentData.comments.length > 0) {
                       const commentAnalyses = await Promise.all(
-                        commentData.comments.map(async (c: any) => {
+                        commentData.comments.map(async (c: any, idx: number) => {
                           try {
+                            const cId = c.id || c.commentId || String(idx + 1);
                             const comp = await openai.chat.completions.create({
                               model: "gpt-4o",
-                              //model: "gpt-5.2",
+                              response_format: { type: "json_object" },
                               messages: [
                                 {
                                   role: "system",
-                                  content:
-                                    "Tentukan sentimen (Positif, Netral, Negatif) dari komentar ini. Jawab satu kata saja.",
+                                  content: `Anda adalah agen AI penganalisis sentimen. 
+                                  Kriteria Penilaian:
+                                  - POSITIVE: apresiasi, semangat, dukungan, cinta, emoji positif (❤️🙏😊🎉).
+                                  - NEGATIVE: kritik, kekecewaan, sarkasme, kemarahan moderat.
+                                  - NEUTRAL: informatif, formal, tanpa emosi jelas.
+                                  - MARAH: kasar, sangat emosional, makian, emoji marah.
+                                  Format output WAJIB JSON:
+{
+  "id": "${cId}",
+  "platform": "${platform.key}",
+  "comment": "Teks komentar",
+  "overall_sentiment": "POSITIVE | NEGATIVE | NEUTRAL | MARAH",
+  "distribution": { "positive": 0, "neutral": 0, "negative": 0, "marah": 0 },
+  "summary": "ringkasan singkat"
+}`
                                 },
-                                { role: "user", content: c.text },
+                                { role: "user", content: `Komentar: ${c.text}` },
                               ],
-                              max_tokens: 5,
+                              temperature: 0.3,
                             });
-                            const sent =
-                              comp.choices[0].message.content
-                                ?.trim()
-                                ?.replace(".", "") || "Netral";
-                            return { ...c, sentiment: sent };
-                          } catch {
-                            return { ...c, sentiment: "Netral" };
+                            
+                            const responseContent = comp.choices[0].message.content || "{}";
+                            const parsed = JSON.parse(responseContent);
+                            let sent = "Netral";
+                            if (parsed.overall_sentiment === "POSITIVE") sent = "Positif";
+                            else if (parsed.overall_sentiment === "NEGATIVE") sent = "Negatif";
+                            else if (parsed.overall_sentiment === "MARAH") sent = "Marah";
+                               
+                            return { 
+                               ...c, 
+                               sentiment: sent,
+                               sentimentData: parsed 
+                            };
+                          } catch (err) {
+                            return { ...c, sentiment: "Netral", sentimentData: null };
                           }
                         }),
                       );
@@ -842,13 +918,107 @@ export async function scraperRoutes(fastify: FastifyInstance) {
                           commentSentiment.Positif++;
                         else if (c.sentiment === "Negatif")
                           commentSentiment.Negatif++;
+                        else if (c.sentiment === "Marah")
+                          commentSentiment.Marah++;
                         else commentSentiment.Netral++;
                       });
                       analyzedComments = commentAnalyses.slice(0, 20);
+
+                      // 2. Overall comments sentiment using Chat Agent
+                      try {
+                        const allCommentsText = analyzedComments.map(ac => ac.text).join(" | ");
+                        const overallId = item.title?.substring(0, 20) || "overall_1";
+                        const agentResponse = await (openai as any).responses.create({
+                          prompt: {
+                            "id": "pmpt_69c8eb9f61748196a2abad66703193c100040af9fa8484f1",
+                            "version": "2",
+                            "variables": {
+                              "id": overallId,
+                              "url": item.link,
+                              "platform": platform.key,
+                              "comment": allCommentsText
+                            }
+                          }
+                        });
+                        
+                        // Handle and parse response from Agent
+                        let parsedAnalysis = null;
+                        let rawContent = "";
+
+                        if (Array.isArray(agentResponse)) {
+                          // Handle multi-part/agentic array responses
+                          const messagePart = agentResponse.find((r: any) => r.type === 'message');
+                          const textContent = messagePart?.content?.find((c: any) => c.type === 'output_text' || c.type === 'text');
+                          rawContent = textContent?.text || JSON.stringify(agentResponse);
+                        } else if (agentResponse?.choices?.[0]?.message?.content) {
+                          rawContent = agentResponse.choices[0].message.content;
+                        } else if (agentResponse?.output) {
+                          rawContent = typeof agentResponse.output === 'string' ? agentResponse.output : JSON.stringify(agentResponse.output);
+                        } else {
+                          rawContent = JSON.stringify(agentResponse);
+                        }
+
+                        console.log(`[Overall Sentiment Raw Content]: ${rawContent.substring(0, 100)}...`);
+
+                        if (rawContent && rawContent.includes("{")) {
+                          try {
+                            // Extract JSON if it's wrapped in markdown code blocks or extra text
+                            const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
+                            const jsonToParse = jsonMatch ? jsonMatch[0] : rawContent;
+                            parsedAnalysis = JSON.parse(jsonToParse);
+                            
+                            // NORMALIZE DISTRIBUTION (Convert strings like "80%" to numbers)
+                            if (parsedAnalysis.distribution) {
+                               const dist = parsedAnalysis.distribution;
+                               ['positive', 'neutral', 'negative', 'marah'].forEach(k => {
+                                  if (typeof dist[k] === 'string') {
+                                     dist[k] = parseInt(dist[k].replace('%', ''), 10) || 0;
+                                  }
+                               });
+                            }
+                          } catch (e) {
+                            console.error("[Overall Sentiment Parsing Failure]:", e);
+                            parsedAnalysis = { summary: rawContent, distribution: { positive: 0, neutral: 0, negative: 0, marah: 0 } };
+                          }
+                        } else {
+                           parsedAnalysis = { summary: rawContent || "Analisis tidak tersedia", distribution: { positive: 0, neutral: 0, negative: 0, marah: 0 } };
+                        }
+
+                        (item as any).overallCommentAnalysis = parsedAnalysis;
+                      } catch (overallErr) {
+                        console.error("[Overall Sentiment Agent Error]:", overallErr);
+                      }
+                    }
+
+                    // Perbandingan Lanjutan untuk Sosial Media / Komentar
+                    let updatedMatchRelevance = item.matchRelevance;
+                    const commentWords = query.toLowerCase().replace(/["']/g, "").split(" ").filter(Boolean);
+                    
+                    if (commentData.comments.length > 0 || (commentData as any).postUsername || item.postUsername) {
+                       const commentFoundWords = commentWords.filter(w => 
+                          commentData.comments.some((c: any) => c.text?.toLowerCase().includes(w))
+                       );
+                       const userFoundWords = commentWords.filter(w => 
+                          commentData.comments.some((c: any) => c.username?.toLowerCase().includes(w)) ||
+                          item.postUsername?.toLowerCase().includes(w) ||
+                          (commentData as any).postUsername?.toLowerCase().includes(w)
+                       );
+
+                       if (commentFoundWords.length > 0) {
+                          updatedMatchRelevance += (updatedMatchRelevance ? " | " : "") + `Ada keyword ${commentFoundWords.map(w => `"${w}"`).join(", ")} pada komentar`;
+                       }
+                       if (userFoundWords.length > 0) {
+                          updatedMatchRelevance += (updatedMatchRelevance ? " | " : "") + `Ada keyword ${userFoundWords.map(w => `"${w}"`).join(", ")} sebagai akun posting/like`;
+                       }
+                    }
+
+                    if (!updatedMatchRelevance) {
+                       updatedMatchRelevance = "Tidak ada kecocokan teks eksplisit (Terscrape via Semantik Algoritma Google/Apify)";
                     }
 
                     return {
                       ...item,
+                      matchRelevance: updatedMatchRelevance,
                       sentiment: contentSentiment,
                       commentSentiment,
                       comments: analyzedComments,
@@ -857,6 +1027,7 @@ export async function scraperRoutes(fastify: FastifyInstance) {
                       postUsername:
                         item.postUsername || (commentData as any).postUsername,
                       postIsVerified: (commentData as any).postIsVerified,
+                      publishedAt: (commentData as any).publishedAt || item.publishedAt,
                     };
                   } catch (err: any) {
                     console.error(
@@ -867,12 +1038,11 @@ export async function scraperRoutes(fastify: FastifyInstance) {
                       ...item,
                       sentiment: "Netral",
                       comments: [],
-                      commentSentiment: { Positif: 0, Netral: 0, Negatif: 0 },
+                      commentSentiment: { Positif: 0, Netral: 0, Negatif: 0, Marah: 0 },
                     };
                   }
-                }),
-              );
-
+                });
+              
               return {
                 key: platform.key,
                 name: platform.name,
