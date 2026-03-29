@@ -38,3 +38,10 @@ Thumbs.db
 # Temporary files
 tmp/
 temp/
+
+
+*.json
+*service-account*.json
+*credentials*.json
+golden-toolbox-402704-2e2b6bce3a59.json
+golden-toolbox-402704-215a0dc15136.json
