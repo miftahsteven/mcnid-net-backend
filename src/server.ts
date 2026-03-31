@@ -34,9 +34,10 @@ import { indeksRoutes } from './routes/indeks.route';
 import { dashboardRoutes } from './routes/dashboard.route';
 import { prisma } from './lib/prisma';
 
-const server = Fastify({ 
+const server = Fastify({
   logger: true,
-  maxParamLength: 500
+  maxParamLength: 500,
+  bodyLimit: 500 * 1024 * 1024,
 });
 
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000,http://localhost:3002').split(',');
@@ -68,7 +69,11 @@ async function bootstrap() {
 
   // ── File upload support ────────────────────
   await server.register(multipart, {
-    limits: { fileSize: 500 * 1024 * 1024 }, // 500MB for video uploads
+    limits: {
+      fileSize: 500 * 1024 * 1024,
+      parts: 10,
+      files: 1,
+    }, // 500MB for video uploads
   });
 
   // Serve static uploads
