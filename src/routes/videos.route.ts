@@ -11,20 +11,77 @@ import path from 'path';
 import { randomBytes } from 'crypto';
 
 export async function videosRoutes(fastify: FastifyInstance) {
-  // PUBLIC: GET all published videos
-  fastify.get('/', async (request: FastifyRequest, reply: FastifyReply) => {
+  // PUBLIC: GET all videos (filtered & sorted)
+  fastify.get('/', async (request: FastifyRequest<{ Querystring: { search?: string, categoryId?: string, sort?: string } }>, reply: FastifyReply) => {
+    const { search, categoryId, sort } = request.query;
+    
+    const where: any = { status: 'PUBLISHED' };
+    
+    if (search) {
+      where.OR = [
+        { title: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } }
+      ];
+    }
+    
+    if (categoryId && categoryId !== 'all') {
+      where.categories = {
+        some: { categoryId }
+      };
+    }
+    
+    let orderBy: any = { publishedAt: 'desc' };
+    if (sort === 'viral') {
+      orderBy = { viewCount: 'desc' };
+    } else if (sort === 'latest') {
+      orderBy = { publishedAt: 'desc' };
+    }
+    
     const videos = await prisma.video.findMany({
-      where: { status: 'PUBLISHED' },
+      where,
       select: {
         id: true, title: true, slug: true, description: true, 
         sourceType: true, videoUrl: true, coverImage: true, duration: true, isHighlight: true,
-        status: true, publishedAt: true,
+        status: true, publishedAt: true, viewCount: true, likeCount: true, dislikeCount: true,
         author: { select: { name: true } },
-        categories: { select: { category: { select: { name: true, slug: true } } } },
+        categories: { select: { category: { select: { id: true, name: true, slug: true } } } },
       },
-      orderBy: { publishedAt: 'desc' },
+      orderBy,
     });
     return reply.send({ data: videos });
+  });
+
+  // PUBLIC: GET video categories (for sidebar)
+  fastify.get('/categories/active', async (request: FastifyRequest, reply: FastifyReply) => {
+    const categories = await prisma.category.findMany({
+      where: { 
+        videos: { 
+          some: { 
+            video: { status: 'PUBLISHED' } 
+          } 
+        } 
+      },
+      orderBy: { name: 'asc' },
+    });
+    return reply.send({ data: categories });
+  });
+
+  // PUBLIC: POST like video
+  fastify.post('/:id/like', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    const video = await prisma.video.update({
+      where: { id: request.params.id },
+      data: { likeCount: { increment: 1 } },
+    });
+    return reply.send({ data: { likeCount: video.likeCount } });
+  });
+
+  // PUBLIC: POST dislike video
+  fastify.post('/:id/dislike', async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
+    const video = await prisma.video.update({
+      where: { id: request.params.id },
+      data: { dislikeCount: { increment: 1 } },
+    });
+    return reply.send({ data: { dislikeCount: video.dislikeCount } });
   });
 
   // INTERNAL: GET single published video by slug

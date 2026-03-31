@@ -110,7 +110,7 @@ export async function dashboardRoutes(fastify: FastifyInstance) {
         const videos = await prisma.video.findMany({
           where: { status: 'PUBLISHED', publishedAt: { lte: now } },
           orderBy: { publishedAt: 'desc' },
-          take: 5,
+          take: 20,
           include: { categories: { include: { category: true } } }
         });
 

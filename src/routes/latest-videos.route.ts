@@ -10,7 +10,7 @@ export async function latestVideosRoutes(fastify: FastifyInstance) {
       const videos = await prisma.video.findMany({
         where: { status: "PUBLISHED", publishedAt: { lte: now } },
         orderBy: { publishedAt: "desc" },
-        take: 5,
+        take: 50,
         include: { 
           categories: { include: { category: true } },
           author: { select: { name: true } }
