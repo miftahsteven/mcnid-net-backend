@@ -143,25 +143,23 @@ export async function authRoutes(fastify: FastifyInstance) {
           return reply.status(401).send({ error: 'User tidak ditemukan atau 2FA nonaktif' });
         }
 
-        // Multi-epoch verification to handle large server clock drift
-        // otplib max epochTolerance = 2940s, server is ~8200s behind real time
-        // So we slide the epoch in chunks of 3000s to cover up to +4.5 hours
+        // Manual multi-epoch verification to bypass otplib guardrail (max 2940s tolerance)
+        // Server clock is ~8200s behind real time, so we scan ahead up to +18000s (5 hours)
         const serverEpoch = Math.floor(Date.now() / 1000);
-        let otpResult: { valid: boolean } = { valid: false };
-        for (const offset of [0, 3000, 6000, 9000, 12000, 15000, 18000]) {
-          const result = await verify({
-            token: totp_code,
+        let otpValid = false;
+        for (let offset = -300; offset <= 18000; offset += 30) {
+          const expectedToken = await generate({
             secret: user.twoFactorSecret,
-            epoch: serverEpoch + offset,
-            epochTolerance: 2940
+            epoch: serverEpoch + offset
           });
-          if (result.valid) {
-            otpResult = result;
+          if (expectedToken === totp_code) {
+            otpValid = true;
+            console.log(`[OTP] Valid at offset +${offset}s from server clock.`);
             break;
           }
         }
 
-        if (!otpResult.valid) {
+        if (!otpValid) {
           try {
              const expectedToken = await generate({ secret: user.twoFactorSecret });
              console.error(`[OTP-DEBUG] User: ${user.username} | Expected: ${expectedToken} | Received: ${totp_code} | ServerTime: ${new Date().toISOString()}`);
