@@ -143,11 +143,11 @@ export async function authRoutes(fastify: FastifyInstance) {
           return reply.status(401).send({ error: 'User tidak ditemukan atau 2FA nonaktif' });
         }
 
-        // Verify TOTP code with epochTolerance: 60 (±60s tolerance for clock drift)
+        // Verify TOTP code with epochTolerance: 10800 (±3 hours tolerance for broken server clock clock drift)
         const otpResult = await verify({ 
           token: totp_code, 
           secret: user.twoFactorSecret,
-          epochTolerance: 60
+          epochTolerance: 10800
         });
 
         if (!otpResult.valid) {
