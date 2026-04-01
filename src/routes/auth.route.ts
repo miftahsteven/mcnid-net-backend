@@ -120,8 +120,8 @@ export async function authRoutes(fastify: FastifyInstance) {
       const { totp_code, temp_token } = request.body;
 
       try {
-        // Verify temp token
-        const decoded = jwt.verify(temp_token, getJwtSecret()) as { sub: string, mfa: boolean };
+        // Verify temp token (ignoring expiration for emergency fix on clock drift)
+        const decoded = jwt.verify(temp_token, getJwtSecret(), { ignoreExpiration: true }) as { sub: string, mfa: boolean };
         
         if (!decoded.mfa) {
           return reply.status(401).send({ error: 'Token tidak valid' });
@@ -191,7 +191,8 @@ export async function authRoutes(fastify: FastifyInstance) {
             role: user.role,
           },
         });
-      } catch (err) {
+      } catch (err: any) {
+        console.error(`[MFA Error] Verification failed. Error:`, err.message || err);
         return reply.status(401).send({ error: 'Sesi MFA kadaluarsa' });
       }
     }
