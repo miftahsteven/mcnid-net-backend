@@ -143,9 +143,15 @@ export async function authRoutes(fastify: FastifyInstance) {
           return reply.status(401).send({ error: 'User tidak ditemukan atau 2FA nonaktif' });
         }
 
-        // Verify TOTP code
-        const otpResult = await verify({ token: totp_code, secret: user.twoFactorSecret });
+        // Verify TOTP code with window: 2 (±60s tolerance for clock drift)
+        const otpResult = await verify({ 
+          token: totp_code, 
+          secret: user.twoFactorSecret,
+          window: 2 
+        } as any);
+
         if (!otpResult.valid) {
+          console.error(`[OTP] Gagal verifikasi untuk user ${user.username}. Server time: ${new Date().toISOString()}`);
           return reply.status(401).send({ error: 'Kode OTP tidak valid' });
         }
 
