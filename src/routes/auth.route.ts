@@ -143,12 +143,23 @@ export async function authRoutes(fastify: FastifyInstance) {
           return reply.status(401).send({ error: 'User tidak ditemukan atau 2FA nonaktif' });
         }
 
-        // Verify TOTP code with epochTolerance: 10800 (±3 hours tolerance for broken server clock clock drift)
-        const otpResult = await verify({ 
-          token: totp_code, 
-          secret: user.twoFactorSecret,
-          epochTolerance: 10800
-        });
+        // Multi-epoch verification to handle large server clock drift
+        // otplib max epochTolerance = 2940s, server is ~8200s behind real time
+        // So we slide the epoch in chunks of 3000s to cover up to +4.5 hours
+        const serverEpoch = Math.floor(Date.now() / 1000);
+        let otpResult: { valid: boolean } = { valid: false };
+        for (const offset of [0, 3000, 6000, 9000, 12000, 15000, 18000]) {
+          const result = await verify({
+            token: totp_code,
+            secret: user.twoFactorSecret,
+            epoch: serverEpoch + offset,
+            epochTolerance: 2940
+          });
+          if (result.valid) {
+            otpResult = result;
+            break;
+          }
+        }
 
         if (!otpResult.valid) {
           try {
