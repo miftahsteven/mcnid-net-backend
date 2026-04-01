@@ -2,7 +2,7 @@ import { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../lib/prisma';
-import { generateSecret, generateURI, verify } from 'otplib';
+import { generateSecret, generateURI, verify, generate } from 'otplib';
 
 // Evaluate at runtime to avoid import hoisting issues with dotenv
 const getJwtSecret = () => process.env.JWT_SECRET || 'changeme_in_production';
@@ -143,15 +143,20 @@ export async function authRoutes(fastify: FastifyInstance) {
           return reply.status(401).send({ error: 'User tidak ditemukan atau 2FA nonaktif' });
         }
 
-        // Verify TOTP code with window: 2 (±60s tolerance for clock drift)
+        // Verify TOTP code with epochTolerance: 60 (±60s tolerance for clock drift)
         const otpResult = await verify({ 
           token: totp_code, 
           secret: user.twoFactorSecret,
-          window: 2 
-        } as any);
+          epochTolerance: 60
+        });
 
         if (!otpResult.valid) {
-          console.error(`[OTP] Gagal verifikasi untuk user ${user.username}. Server time: ${new Date().toISOString()}`);
+          try {
+             const expectedToken = await generate({ secret: user.twoFactorSecret });
+             console.error(`[OTP-DEBUG] User: ${user.username} | Expected: ${expectedToken} | Received: ${totp_code} | ServerTime: ${new Date().toISOString()}`);
+          } catch(e) {
+             console.error(`[OTP-DEBUG] Failed to generate expected token: ${(e as Error).message}`);
+          }
           return reply.status(401).send({ error: 'Kode OTP tidak valid' });
         }
 
