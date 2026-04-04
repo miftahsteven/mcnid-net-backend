@@ -128,16 +128,54 @@ model Media {
 }
 
 model ChatLog {
-  id        String   @id @default(cuid())
+  id        String       @id @default(cuid())
   sessionId String
+  userId    String?
+  userName  String?
+  userEmail String?
   question  String
   answer    String
   intent    String?
   ipHash    String?
   tokens    Int?
-  createdAt DateTime @default(now())
+  mode      String?
+  confidence Float?
+  createdAt DateTime     @default(now())
+  sources   ChatSource[]
+  feedbacks Feedback[]
 
   @@map("chat_logs")
+}
+
+model ChatSource {
+  id         String   @id @default(cuid())
+  chatId     String
+  sourceType String
+  sourceUrl  String?
+  title      String?
+  chat       ChatLog  @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@map("chat_sources")
+}
+
+model Feedback {
+  id        String   @id @default(cuid())
+  chatId    String   @unique
+  isHelpful Boolean
+  chat      ChatLog  @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@map("feedback")
+}
+
+model BlockedKiAiUser {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  userName  String?
+  userEmail String?
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@map("ki_ai_blocked_users")
 }
 
 model KnowledgeBase {
@@ -151,6 +189,26 @@ model KnowledgeBase {
 
   @@map("knowledge_base")
 }
+
+model KiAiKnowledge {
+
+  id          String   @id @default(cuid())
+  category    String
+  title       String?
+  description String?   @db.Text
+  content     String    @db.Text
+  keywords    String?   @db.Text
+  status      String    @default("PUBLISHED")
+  sharing     String    @default("PUBLIC")
+  author      String?   @default("K.H. Cholil Nafis")
+  sourceLink  String?
+  metadata    Json?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("ki_ai_knowledge")
+}
+
 
 model Work {
   id         String   @id @default(cuid())

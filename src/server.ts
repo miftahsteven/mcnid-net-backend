@@ -32,7 +32,9 @@ import { viewsRoutes } from './routes/views.route';
 import { trendingRoutes } from './routes/trending.route';
 import { indeksRoutes } from './routes/indeks.route';
 import { dashboardRoutes } from './routes/dashboard.route';
+import { kiAiRoutes } from './routes/ki-ai.route';
 import { prisma } from './lib/prisma';
+
 
 const server = Fastify({
   logger: true,
@@ -109,6 +111,8 @@ async function bootstrap() {
   await server.register(trendingRoutes, { prefix: '/api/trending' });
   await server.register(indeksRoutes, { prefix: '/api/indeks' });
   await server.register(dashboardRoutes, { prefix: '/api/admin/dashboard' });
+  await server.register(kiAiRoutes, { prefix: '/api/admin/ki-ai' });
+
 
   // ── Health check ───────────────────────────
   server.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
