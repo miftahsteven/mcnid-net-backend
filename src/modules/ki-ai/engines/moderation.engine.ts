@@ -4,17 +4,18 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY || '',
 });
 
-export type ModerationCategory = 'GOOD' | 'OFF_TOPIC' | 'BAD';
+export type ModerationCategory = 'GOOD' | 'OFF_TOPIC' | 'BAD' | 'GREETING';
 
 export class ModerationEngine {
   private systemPrompt = `Anda adalah asisten moderasi konten untuk KI.AI, chatbot konsultasi keislaman berbasis pemikiran K.H. Cholil Nafis.
 Tugas Anda adalah mengklasifikasikan pesan pengguna ke dalam salah satu kategori berikut:
 
-1. "GOOD": Pertanyaan yang sopan, relevan dengan Islam, hukum syariah, konsultasi keagamaan, atau sapaan umum yang wajar.
-2. "OFF_TOPIC": Pertanyaan yang SOPAN dan POSITIF, tetapi TIDAK berkaitan dengan Islam atau pemikiran K.H. Cholil Nafis (misal: tanya soal matematika, sepak bola, resep masakan, tips teknologi).
-3. "BAD": Pertanyaan yang mengandung kata-kata kotor (profanity), tidak senonoh, penghinaan terhadap Islam/Ulama, ujaran kebencian, atau sentimen yang sangat negatif dan menyerang.
+1. "GOOD": Pertanyaan nyata yang sopan, relevan dengan Islam, hukum syariah, atau konsultasi keagamaan. (Pilih ini HANYA jika ada substansi pertanyaan).
+2. "GREETING": Sapaan, basa-basi, ujaran penutup, atau sekadar memanggil tanpa ada substansi pertanyaan yang jelas (misal: "halo", "assalamualaikum", "saya mau bertanya", "tes", "terima kasih kiai", "selamat pagi", kalimat iseng netral).
+3. "OFF_TOPIC": Pertanyaan nyata yang SOPAN dan POSITIF, tetapi TIDAK berkaitan dengan Islam atau hal keagamaan (misal: tanya resep masakan, pemrograman, sejarah eropa, dll).
+4. "BAD": Pesan yang mengandung kata-kata kotor (profanity), sumpah serapah, makian, tidak senonoh, penghinaan, ujaran kebencian, atau menyerang.
 
-Aturan output: Hanya balas dengan satu kata saja: GOOD, OFF_TOPIC, atau BAD. Jangan beri penjelasan apapun.`;
+Aturan output: Hanya balas dengan satu kata saja: GOOD, GREETING, OFF_TOPIC, atau BAD. Jangan beri penjelasan apapun.`;
 
   async classifyMessage(message: string): Promise<ModerationCategory> {
     if (!process.env.OPENAI_API_KEY) {
@@ -36,6 +37,7 @@ Aturan output: Hanya balas dengan satu kata saja: GOOD, OFF_TOPIC, atau BAD. Jan
       
       if (result === 'OFF_TOPIC') return 'OFF_TOPIC';
       if (result === 'BAD') return 'BAD';
+      if (result === 'GREETING') return 'GREETING';
       return 'GOOD';
     } catch (error) {
       console.error('Moderation Engine Error:', error);

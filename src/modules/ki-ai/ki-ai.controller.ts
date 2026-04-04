@@ -19,6 +19,33 @@ const ChatRequestSchema = z.object({
 });
 
 export class KiAiController {
+  private async calculateUsedQuota(userId: string): Promise<number> {
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const logsToday = await prisma.chatLog.findMany({
+      where: { 
+        userId,
+        createdAt: { gte: startOfToday }
+      },
+      select: { mode: true }
+    });
+
+    let questionCount = 0;
+    let greetingCount = 0;
+
+    for (const log of logsToday) {
+      if (log.mode === 'greeting') {
+        greetingCount++;
+      } else if (log.mode !== 'pending' && log.mode !== 'blocked' && log.mode !== 'rate-limited') {
+        questionCount++;
+      }
+    }
+
+    return questionCount + Math.floor(greetingCount / 3);
+  }
+
+
   async handleChat(request: FastifyRequest, reply: FastifyReply) {
     try {
       const parsed = ChatRequestSchema.safeParse(request.body);
@@ -129,17 +156,27 @@ export class KiAiController {
         return;
       }
 
+
+      if (category === 'GREETING') {
+        const friendlyMsg = `Halo! Anda belum mengajukan pertanyaan. Apakah ada yang ingin ditanyakan seputar keislaman hari ini?`;
+        
+        await prisma.chatLog.update({
+          where: { id: initialLog.id },
+          data: { answer: friendlyMsg, mode: 'greeting', confidence: 1.0 }
+        });
+
+        reply.raw.setHeader('Content-Type', 'text/event-stream');
+        reply.raw.setHeader('Cache-Control', 'no-cache');
+        reply.raw.setHeader('Connection', 'keep-alive');
+        reply.raw.write(`data: ${JSON.stringify({ text: friendlyMsg })}\n\n`);
+        reply.raw.write('data: [DONE]\n\n');
+        reply.raw.end();
+        return;
+      }
+
       // 2. Global Daily Rate limit per User
       if (final_user_id) {
-        const startOfToday = new Date();
-        startOfToday.setHours(0, 0, 0, 0);
-
-        const dailyCount = await prisma.chatLog.count({
-          where: {
-            userId: final_user_id,
-            createdAt: { gte: startOfToday }
-          },
-        });
+        const dailyCount = await this.calculateUsedQuota(final_user_id);
 
         if (dailyCount >= 5) {
           const limitMsg = "Anda telah mencapai batas maksimal 5 pertanyaan untuk hari ini. Silakan kembali besok atau hubungi redaksi@mcnid.net.";
@@ -250,14 +287,7 @@ export class KiAiController {
         return reply.status(400).send({ error: 'user_id is required' });
       }
 
-      const startOfToday = new Date();
-      startOfToday.setHours(0, 0, 0, 0);
-      const dailyCount = await prisma.chatLog.count({
-        where: { 
-          userId: final_user_id,
-          createdAt: { gte: startOfToday }
-        },
-      });
+      const dailyCount = await this.calculateUsedQuota(final_user_id);
 
       const logs = await prisma.chatLog.findMany({
         where: { userId: final_user_id },
