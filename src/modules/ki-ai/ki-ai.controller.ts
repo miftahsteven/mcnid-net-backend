@@ -24,7 +24,7 @@ export class KiAiController {
     startOfToday.setHours(0, 0, 0, 0);
 
     const logsToday = await prisma.chatLog.findMany({
-      where: { 
+      where: {
         userId,
         createdAt: { gte: startOfToday }
       },
@@ -35,7 +35,7 @@ export class KiAiController {
     let greetingCount = 0;
 
     for (const log of logsToday) {
-      if (log.mode === 'greeting') {
+      if (log.mode === 'greeting' || log.mode === 'off-topic') {
         greetingCount++;
       } else if (log.mode !== 'pending' && log.mode !== 'blocked' && log.mode !== 'rate-limited') {
         questionCount++;
@@ -53,15 +53,15 @@ export class KiAiController {
         return reply.status(400).send({ error: parsed.error.errors });
       }
 
-      const { 
-        message, 
-        session_id, 
-        user_id, 
-        userId, 
-        user_name, 
-        userName, 
-        user_email, 
-        userEmail 
+      const {
+        message,
+        session_id,
+        user_id,
+        userId,
+        user_name,
+        userName,
+        user_email,
+        userEmail
       } = parsed.data;
 
       const final_user_id = user_id || userId;
@@ -86,7 +86,7 @@ export class KiAiController {
         const isBlocked = await prisma.blockedKiAiUser.findUnique({ where: { userId: final_user_id } });
         if (isBlocked) {
           const blockMsg = "Mohon maaf, akun Anda telah diblokir secara permanen dari layanan KI.AI karena pelanggaran pedoman komunitas sebelumnya. Anda tidak dapat melanjutkan konsultasi.";
-          
+
           await prisma.chatLog.update({
             where: { id: initialLog.id },
             data: { answer: blockMsg, mode: 'blocked' }
@@ -107,7 +107,7 @@ export class KiAiController {
 
       if (category === 'BAD') {
         const blockText = "Pertanyaan Anda mengandung konten yang tidak pantas, menyinggung, atau melanggar pedoman kami. Demi menjaga kesantunan dan kehormatan majelis ilmu ini, akun Anda telah kami BLOKIR PERMANEN. Harap gunakan bahasa yang baik dan sopan di lain kesempatan.";
-        
+
         await prisma.chatLog.update({
           where: { id: initialLog.id },
           data: { answer: blockText, mode: 'blocked' }
@@ -116,20 +116,20 @@ export class KiAiController {
         if (final_user_id) {
           await prisma.blockedKiAiUser.upsert({
             where: { userId: final_user_id },
-            update: { 
+            update: {
               userName: final_user_name || null,
               userEmail: final_user_email || null,
-              reason: `Automatic block for: "${message.substring(0, 100)}"` 
+              reason: `Automatic block for: "${message.substring(0, 100)}"`
             },
-            create: { 
-              userId: final_user_id, 
+            create: {
+              userId: final_user_id,
               userName: final_user_name || null,
               userEmail: final_user_email || null,
-              reason: `Automatic block for: "${message.substring(0, 100)}"` 
+              reason: `Automatic block for: "${message.substring(0, 100)}"`
             },
           });
         }
-        
+
         reply.raw.setHeader('Content-Type', 'text/event-stream');
         reply.raw.setHeader('Cache-Control', 'no-cache');
         reply.raw.setHeader('Connection', 'keep-alive');
@@ -141,7 +141,7 @@ export class KiAiController {
 
       if (category === 'OFF_TOPIC') {
         const friendlyMsg = `Assalamu'alaikum Wr. Wb. Terima kasih atas pertanyaannya yang cukup menarik. Namun, perlu kami sampaikan bahwa layanan KI.AI ini secara khusus difokuskan untuk konsultasi seputar dunia keislaman dan pemikiran kami.\n\nSayang sekali jika kuota harian Anda yang terbatas (5 pertanyaan) terpakai untuk hal di luar materi keislaman. Mari kita manfaatkan kesempatan ini untuk memperdalam ilmu agama. Silakan ajukan pertanyaan seputar hukum Islam, ibadah, atau kehidupan beragama lainnya ya. Barakallah.`;
-        
+
         await prisma.chatLog.update({
           where: { id: initialLog.id },
           data: { answer: friendlyMsg, mode: 'off-topic', confidence: 1.0 }
@@ -158,8 +158,25 @@ export class KiAiController {
 
 
       if (category === 'GREETING') {
-        const friendlyMsg = `Halo! Anda belum mengajukan pertanyaan. Apakah ada yang ingin ditanyakan seputar keislaman hari ini?`;
-        
+        const greetings = [
+          "Senang sekali disapa. Ada kemusykilan (masalah) agama apa nih yang bisa kita diskusikan hari ini?",
+          "Ayo, jangan sungkan-sungkan, asisten kiai di sini tidak galak kok. Ada pertanyaan?",
+          "Ahlan wa Sahlan! MasyaAllah, sapaan yang membawa berkah. Daripada diam-diaman, mending kita bahas hukum Islam. Silakan!",
+          "Wah, kelihatannya lagi semangat ya? Mari kita tumpahkan semangatnya ke dalam pertanyaan keislaman.",
+          "Halo! Sapaannya sudah sampai ke meja saya. Sekarang saya tunggu pertanyaan Anda. Tenang, konsultasi di sini gratis, bayarnya pakai doa saja.",
+          "Assalamu'alaikum! Wa'alaikumussalam... eh, saya belum jawab ya? Hehe. Mari, silakan kalau ada yang ingin ditanyakan soal agama.",
+          "Salam hangat! Senang disapa Anda. Tapi saya lebih senang lagi kalau ditanya soal ilmu. Ada yang sedang dipikirkan soal fikih?",
+          "MasyaAllah, indahnya ukhuwah. Monggo, silakan ajukan pertanyaan Anda. Saya sudah siap dengan referensinya nih.",
+          "Halo! Sapaannya sudah diterima dengan baik. Yuk, daripada cuma 'Halo', kita cari pahala dengan belajar agama. Apa pertanyaannya?",
+          "Ada masalah ibadah atau muamalah yang ingin kita urai benang kusutnya?",
+          "Berkunjung tanpa bertanya ibarat makan sayur tanpa garam. Kurang mantap! Silakan, apa yang ingin ditanyakan?",
+          "Halo, Sahabat! Senang sekali bisa berjumpa lewat chat ini. Jangan malu-malu, sampaikan saja kebingungan Anda soal agama.",
+          "Yuk, Semoga menjadi amal jariyah. Ayo, ada yang ingin dikonsultasikan seputar keislaman?",
+          "Salam! Wah, sapaannya singkat padat. Semoga pertanyaannya nanti lebih berbobot lagi ya. Hehe. Monggo, silakan tanya.",
+          "Terima kasih sudah menyapa. Yuk, manfaatkan kesempatan hari ini untuk hal yang bermanfaat. Ada pertanyaan apa?"
+        ];
+        const friendlyMsg = greetings[Math.floor(Math.random() * greetings.length)];
+
         await prisma.chatLog.update({
           where: { id: initialLog.id },
           data: { answer: friendlyMsg, mode: 'greeting', confidence: 1.0 }
@@ -180,7 +197,7 @@ export class KiAiController {
 
         if (dailyCount >= 5) {
           const limitMsg = "Anda telah mencapai batas maksimal 5 pertanyaan untuk hari ini. Silakan kembali besok atau hubungi redaksi@mcnid.net.";
-          
+
           await prisma.chatLog.update({
             where: { id: initialLog.id },
             data: { answer: limitMsg, mode: 'rate-limited' }
@@ -382,11 +399,11 @@ export class KiAiController {
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
 
-      const deleted = await prisma.chatLog.deleteMany({ 
-        where: { 
+      const deleted = await prisma.chatLog.deleteMany({
+        where: {
           userId,
           createdAt: { gte: startOfToday }
-        } 
+        }
       });
 
       return reply.send({ message: `Berhasil mereset limit. ${deleted.count} pertanyaan hari ini dihapus.` });
