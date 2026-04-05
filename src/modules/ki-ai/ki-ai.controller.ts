@@ -164,19 +164,24 @@ export class KiAiController {
           "Ahlan wa Sahlan! MasyaAllah, sapaan yang membawa berkah. Daripada diam-diaman, mending kita bahas hukum Islam. Silakan!",
           "Wah, kelihatannya lagi semangat ya? Mari kita tumpahkan semangatnya ke dalam pertanyaan keislaman.",
           "Halo! Sapaannya sudah sampai ke meja saya. Sekarang saya tunggu pertanyaan Anda. Tenang, konsultasi di sini gratis, bayarnya pakai doa saja.",
-          "Assalamu'alaikum! Wa'alaikumussalam... eh, saya belum jawab ya? Hehe. Mari, silakan kalau ada yang ingin ditanyakan soal agama.",
+          "Silakan, kalau ada yang ingin ditanyakan soal agama. Pintu konsultasi selalu terbuka.",
           "Salam hangat! Senang disapa Anda. Tapi saya lebih senang lagi kalau ditanya soal ilmu. Ada yang sedang dipikirkan soal fikih?",
           "MasyaAllah, indahnya ukhuwah. Monggo, silakan ajukan pertanyaan Anda. Saya sudah siap dengan referensinya nih.",
           "Halo! Sapaannya sudah diterima dengan baik. Yuk, daripada cuma 'Halo', kita cari pahala dengan belajar agama. Apa pertanyaannya?",
           "Ada masalah ibadah atau muamalah yang ingin kita urai benang kusutnya?",
           "Berkunjung tanpa bertanya ibarat makan sayur tanpa garam. Kurang mantap! Silakan, apa yang ingin ditanyakan?",
           "Halo, Sahabat! Senang sekali bisa berjumpa lewat chat ini. Jangan malu-malu, sampaikan saja kebingungan Anda soal agama.",
-          "Yuk, Semoga menjadi amal jariyah. Ayo, ada yang ingin dikonsultasikan seputar keislaman?",
+          "Yuk, semoga menjadi amal jariyah. Ayo, ada yang ingin dikonsultasikan seputar keislaman?",
           "Salam! Wah, sapaannya singkat padat. Semoga pertanyaannya nanti lebih berbobot lagi ya. Hehe. Monggo, silakan tanya.",
           "Terima kasih sudah menyapa. Yuk, manfaatkan kesempatan hari ini untuk hal yang bermanfaat. Ada pertanyaan apa?"
         ];
-        const friendlyMsg = greetings[Math.floor(Math.random() * greetings.length)];
-
+        
+        const randomMsg = greetings[Math.floor(Math.random() * greetings.length)];
+        const lowerMessage = message.toLowerCase();
+        const hasSalam = lowerMessage.includes("assalamu'alaikum") || lowerMessage.includes("assalamualaikum");
+        
+        const friendlyMsg = hasSalam ? `Wa'alaikum salam, ${randomMsg}` : randomMsg;
+        
         await prisma.chatLog.update({
           where: { id: initialLog.id },
           data: { answer: friendlyMsg, mode: 'greeting', confidence: 1.0 }
