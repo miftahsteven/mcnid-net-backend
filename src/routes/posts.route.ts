@@ -8,18 +8,42 @@ import { ZodError } from 'zod';
 
 export async function postsRoutes(fastify: FastifyInstance) {
   // GET all published posts (public)
-  fastify.get('/', async (request: FastifyRequest, reply: FastifyReply) => {
+  fastify.get('/', async (request: FastifyRequest<{ Querystring: { type?: string; limit?: string } }>, reply: FastifyReply) => {
+    const { type, limit } = request.query as { type?: string; limit?: string };
+    const take = limit ? parseInt(limit) : undefined;
+
     const posts = await prisma.post.findMany({
-      where: { status: 'PUBLISHED' },
+      where: {
+        status: 'PUBLISHED',
+        publishedAt: { lte: new Date() },
+        ...(type ? { 
+          type: {
+            equals: type,
+            mode: 'insensitive'
+          }
+        } : {}),
+      },
       select: {
         id: true, title: true, slug: true, excerpt: true,
-        coverImage: true, publishedAt: true,
-        author: { select: { name: true } },
+        content: true,
+        type: true,
+        coverImage: true, publishedAt: true, viewCount: true,
+        customAuthor: true,
+        author: { select: { name: true, image: true } },
         categories: { select: { category: { select: { name: true, slug: true } } } },
       },
       orderBy: { publishedAt: 'desc' },
+      ...(take ? { take } : {}),
     });
-    return reply.send({ data: posts });
+
+    // Fallback excerpt generation if empty
+    const postsWithExcerpt = posts.map(post => ({
+      ...post,
+      excerpt: post.excerpt || post.content?.replace(/<[^>]*>?/gm, '').substring(0, 160) + '...',
+      content: undefined // Remove content from list response to keep it light
+    }));
+
+    return reply.send({ data: postsWithExcerpt });
   });
 
   // GET all posts for admin (all statuses)

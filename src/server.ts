@@ -140,4 +140,5 @@ async function bootstrap() {
   }
 }
 
+// Trigger reload
 bootstrap();
