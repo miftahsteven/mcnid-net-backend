@@ -71,10 +71,27 @@ export async function indeksRoutes(fastify: FastifyInstance) {
               },
             },
           };
-          postWhere.categories = catFilter;
+
+          // Check if it matches one of the new subContent options
+          const subContentOptions = ["Nasional", "Keislaman", "Tokoh", "Internasional", "Ekonomi", "Pendidikan", "Sosial", "Hukum"];
+          const matchedOption = subContentOptions.find(opt => slugify(opt) === targetSlug);
+
+          if (matchedOption) {
+            // Match subContent OR categories
+            postWhere.OR = [
+              { subContent: matchedOption },
+              { categories: catFilter }
+            ];
+          } else {
+            postWhere.categories = catFilter;
+          }
+
           videoWhere.categories = catFilter;
         }
       }
+
+      console.log("[Indeks DEBUG] postWhere:", JSON.stringify(postWhere, null, 2));
+      console.log("[Indeks DEBUG] videoWhere:", JSON.stringify(videoWhere, null, 2));
 
       // Fetch from both tables
       const [posts, videos, totalPosts, totalVideos] = await Promise.all([
@@ -102,8 +119,8 @@ export async function indeksRoutes(fastify: FastifyInstance) {
         title: p.title,
         slug: p.slug,
         image: p.coverImage,
-        category: p.categories[0]?.category.name || "Berita",
-        categorySlug: p.categories[0]?.category.slug || "berita",
+        category: p.subContent || p.categories[0]?.category.name || "Berita",
+        categorySlug: p.subContent ? slugify(p.subContent) : (p.categories[0]?.category.slug || "berita"),
         publishedAt: p.publishedAt,
         type: "post",
         views: p.viewCount || 0,

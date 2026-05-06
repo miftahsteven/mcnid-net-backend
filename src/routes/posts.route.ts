@@ -27,6 +27,7 @@ export async function postsRoutes(fastify: FastifyInstance) {
         id: true, title: true, slug: true, excerpt: true,
         content: true,
         type: true,
+        subContent: true,
         coverImage: true, publishedAt: true, viewCount: true,
         customAuthor: true,
         author: { select: { name: true, image: true } },
@@ -52,7 +53,7 @@ export async function postsRoutes(fastify: FastifyInstance) {
     handler: async (request: FastifyRequest, reply: FastifyReply) => {
       const posts = await prisma.post.findMany({
         select: {
-          id: true, title: true, slug: true, excerpt: true, type: true,
+          id: true, title: true, slug: true, excerpt: true, type: true, subContent: true,
           status: true, coverImage: true, publishedAt: true, createdAt: true,
           author: { select: { name: true } },
           categories: { select: { category: { select: { name: true } } } },

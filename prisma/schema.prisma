@@ -44,6 +44,7 @@ model Post {
   updatedAt    DateTime       @updatedAt
   customAuthor String?
   type         String         @default("news")
+  subContent   String         @default("Nasional")
   isHighlight  Boolean        @default(false)
   viewCount    Int            @default(0)
   categories   PostCategory[]

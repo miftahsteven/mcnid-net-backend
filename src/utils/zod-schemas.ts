@@ -9,6 +9,7 @@ export const CreatePostSchema = z.object({
   coverImage: z.string().optional(),
   status: z.enum(['DRAFT', 'REVIEW', 'PUBLISHED', 'ARCHIVED']).default('DRAFT'),
   type: z.string().optional(),
+  subContent: z.string().optional(),
   customAuthor: z.string().optional(),
   publishedAt: z.union([z.string(), z.date()]).optional().transform(v => v ? new Date(v) : undefined),
   seoTitle: z.string().max(100).optional(),
