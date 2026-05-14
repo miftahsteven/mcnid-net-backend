@@ -25,7 +25,8 @@ ATURAN UTAMA DAN PRIORITAS RUJUKAN:
     mode: ChatMode,
     internalData: InternalKnowledgeResult[],
     externalData: ExternalKnowledgeResult[],
-    includeDalil: boolean = false
+    includeDalil: boolean = false,
+    history: { question: string; answer: string }[] = []
   ) {
     let contextText = '';
 
@@ -73,20 +74,31 @@ ${instructions}
     mode: ChatMode,
     internalData: InternalKnowledgeResult[],
     externalData: ExternalKnowledgeResult[],
-    includeDalil: boolean = false
+    includeDalil: boolean = false,
+    history: { question: string; answer: string }[] = []
   ) {
     if (!process.env.OPENAI_API_KEY) {
       throw new Error('OPENAI_API_KEY is not configured');
     }
 
-    const finalPrompt = this.buildPrompt(question, mode, internalData, externalData, includeDalil);
+    const finalPrompt = this.buildPrompt(question, mode, internalData, externalData, includeDalil, history);
+
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      { role: 'system', content: this.basePrompt },
+    ];
+
+    // Add history to messages for conversational context
+    history.forEach((h) => {
+      messages.push({ role: 'user', content: h.question });
+      messages.push({ role: 'assistant', content: h.answer });
+    });
+
+    // Add current prompt
+    messages.push({ role: 'user', content: finalPrompt });
 
     return await openai.chat.completions.create({
       model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: this.basePrompt },
-        { role: 'user', content: finalPrompt },
-      ],
+      messages,
       stream: true,
       temperature: 0.2,
     });
@@ -97,20 +109,30 @@ ${instructions}
     mode: ChatMode,
     internalData: InternalKnowledgeResult[],
     externalData: ExternalKnowledgeResult[],
-    includeDalil: boolean = false
+    includeDalil: boolean = false,
+    history: { question: string; answer: string }[] = []
   ) {
     if (!process.env.OPENAI_API_KEY) {
       throw new Error('OPENAI_API_KEY is not configured');
     }
 
-    const finalPrompt = this.buildPrompt(question, mode, internalData, externalData, includeDalil);
+    const finalPrompt = this.buildPrompt(question, mode, internalData, externalData, includeDalil, history);
+
+    const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+      { role: 'system', content: this.basePrompt },
+    ];
+
+    // Add history to messages
+    history.forEach((h) => {
+      messages.push({ role: 'user', content: h.question });
+      messages.push({ role: 'assistant', content: h.answer });
+    });
+
+    messages.push({ role: 'user', content: finalPrompt });
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o',
-      messages: [
-        { role: 'system', content: this.basePrompt },
-        { role: 'user', content: finalPrompt },
-      ],
+      messages,
       stream: false,
       temperature: 0.2,
     });

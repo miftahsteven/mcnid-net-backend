@@ -141,6 +141,7 @@ model ChatLog {
   tokens    Int?
   mode      String?
   confidence Float?
+  donationAppeal String?
   createdAt DateTime     @default(now())
   sources   ChatSource[]
   feedbacks Feedback[]

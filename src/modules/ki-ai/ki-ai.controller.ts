@@ -4,6 +4,7 @@ import { externalEngine, ExternalKnowledgeResult } from './engines/external.engi
 import { decisionEngine } from './engines/decision.engine';
 import { llmEngine } from './engines/llm.engine';
 import { moderationEngine } from './engines/moderation.engine';
+import { refinementEngine } from './engines/refinement.engine';
 import { prisma } from '../../lib/prisma';
 import { z } from 'zod';
 
@@ -102,8 +103,26 @@ export class KiAiController {
         }
       }
 
-      // 1. Content Moderation
-      const category = await moderationEngine.classifyMessage(message);
+      // 1. Get History (Exclude the current pending log)
+      const historyLogs = await prisma.chatLog.findMany({
+        where: { 
+          sessionId: session_id,
+          id: { not: initialLog.id }
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 3,
+      });
+
+      const history = historyLogs.reverse().map(h => ({
+        question: h.question,
+        answer: h.answer
+      }));
+
+      // 2. Refine Question (Context awareness)
+      const refinedMessage = await refinementEngine.refineQuestion(message, history);
+
+      // 3. Content Moderation (Use refined message for better accuracy on follow-ups)
+      const category = await moderationEngine.classifyMessage(refinedMessage);
 
       if (category === 'BAD') {
         const blockText = "Pertanyaan Anda mengandung konten yang tidak pantas, menyinggung, atau melanggar pedoman kami. Demi menjaga kesantunan dan kehormatan majelis ilmu ini, akun Anda telah kami BLOKIR PERMANEN. Harap gunakan bahasa yang baik dan sopan di lain kesempatan.";
@@ -218,8 +237,8 @@ export class KiAiController {
         }
       }
 
-      // 1. Search internal knowledge
-      const internalResults = await knowledgeEngine.search(message, 5);
+      // 1. Search internal knowledge (Use refined message)
+      const internalResults = await knowledgeEngine.search(refinedMessage, 5);
 
       // 2. Decide Mode
       const decision = decisionEngine.decideMode(internalResults);
@@ -228,7 +247,7 @@ export class KiAiController {
       // 3. Search external if needed
       let externalResults: ExternalKnowledgeResult[] = [];
       if (mode === 'hybrid' || mode === 'external') {
-        externalResults = await externalEngine.search(message, 3);
+        externalResults = await externalEngine.search(refinedMessage, 3);
       }
 
       // 4. Build Sources Data for response
@@ -255,8 +274,8 @@ export class KiAiController {
         });
       }
 
-      // 5. Call LLM
-      const stream = await llmEngine.buildAndStreamPrompt(message, mode, internalResults, externalResults);
+      // 5. Call LLM (Pass history for conversational context)
+      const stream = await llmEngine.buildAndStreamPrompt(message, mode, internalResults, externalResults, false, history);
 
       reply.raw.setHeader('Content-Type', 'text/event-stream');
       reply.raw.setHeader('Cache-Control', 'no-cache');
@@ -271,13 +290,28 @@ export class KiAiController {
         }
       }
 
+      // 6. Check for Donation Appeal (Randomly shown starting from the 2nd question)
+      const dailyCount = final_user_id ? await this.calculateUsedQuota(final_user_id) : 0;
+      const currentDailyCount = dailyCount + 1;
+      const currentSessionCount = (history?.length || 0) + 1;
+
+      const shouldShowDonation =
+        (currentDailyCount >= 2 && currentDailyCount <= 4) ||
+        (currentSessionCount >= 2 && currentSessionCount <= 4) ||
+        (currentDailyCount >= 2 && Math.random() < 0.7);
+
+      const donationAppeal = shouldShowDonation ? 
+        'Mari ikut mendukung perkembangan da\'wah digital KI.AI agar layanan ini terus hadir membantu umat mendapatkan akses ilmu dan jawaban keislaman yang mudah dipahami. Salurkan infaq terbaik Anda melalui tautan berikut: https://amanahzakat.id/program/27. Terima kasih.' 
+        : null;
+
       // Metadata at the end
       reply.raw.write(`data: ${JSON.stringify({
         metadata: {
           mode,
           sources,
           confidence,
-          chat_id: initialLog.id
+          chat_id: initialLog.id,
+          donationAppeal
         }
       })}\n\n`);
 
@@ -287,7 +321,7 @@ export class KiAiController {
       // Final db update
       await prisma.chatLog.update({
         where: { id: initialLog.id },
-        data: { answer: fullAnswer }
+        data: { answer: fullAnswer, donationAppeal }
       });
 
     } catch (error: any) {
@@ -311,17 +345,28 @@ export class KiAiController {
 
       const dailyCount = await this.calculateUsedQuota(final_user_id);
 
-      const logs = await prisma.chatLog.findMany({
-        where: { userId: final_user_id },
-        orderBy: { createdAt: 'desc' },
-        distinct: ['sessionId'],
-        select: {
-          sessionId: true,
-          question: true,
-          createdAt: true
-        },
-        take: 10
-      });
+      // Raw query to get unique sessions with their FIRST question but ordered by LATEST activity
+      const sessions = await prisma.$queryRaw`
+        SELECT DISTINCT ON ("sessionId") 
+          "sessionId", 
+          "question", 
+          "createdAt",
+          MAX("createdAt") OVER (PARTITION BY "sessionId") as "lastActivity"
+        FROM "chat_logs"
+        WHERE "userId" = ${final_user_id}
+        ORDER BY "sessionId", "createdAt" ASC
+      ` as any[];
+
+      // Sort by lastActivity desc in JS
+      const sortedSessions = sessions
+        .sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime())
+        .slice(0, 15);
+
+      const logs = sortedSessions.map(s => ({
+        sessionId: s.sessionId,
+        question: s.question,
+        createdAt: s.createdAt
+      }));
 
       const isBlocked = await prisma.blockedKiAiUser.findUnique({
         where: { userId: final_user_id }
