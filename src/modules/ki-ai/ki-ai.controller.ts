@@ -1,16 +1,15 @@
 import { FastifyRequest, FastifyReply } from 'fastify';
-import { knowledgeEngine, InternalKnowledgeResult } from './engines/knowledge.engine';
-import { externalEngine, ExternalKnowledgeResult } from './engines/external.engine';
-import { decisionEngine } from './engines/decision.engine';
-import { llmEngine } from './engines/llm.engine';
+import { kiAiKnowledgeService as kiAiService } from '../../services/ki-ai.service';
 import { moderationEngine } from './engines/moderation.engine';
-import { refinementEngine } from './engines/refinement.engine';
+import { agentRouter } from './core/agent-router.service';
+import { AgentRouteInput } from './core/types';
 import { prisma } from '../../lib/prisma';
 import { z } from 'zod';
 
 const ChatRequestSchema = z.object({
   message: z.string().min(1),
   session_id: z.string(),
+  agent: z.enum(['general', 'maktabah_syamilah']).optional(),
   user_id: z.string().optional(),
   userId: z.string().optional(), // Fallback for camelCase
   user_name: z.string().optional(),
@@ -24,29 +23,17 @@ export class KiAiController {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
-    const logsToday = await prisma.chatLog.findMany({
+    const count = await prisma.chatLog.count({
       where: {
         userId,
-        createdAt: { gte: startOfToday }
+        createdAt: {
+          gte: startOfToday,
+        },
       },
-      select: { mode: true }
     });
 
-    let questionCount = 0;
-    let greetingCount = 0;
-
-    for (const log of logsToday) {
-      if (log.mode === 'greeting' || log.mode === 'off-topic') {
-        greetingCount++;
-      } else if (log.mode !== 'pending' && log.mode !== 'blocked' && log.mode !== 'rate-limited') {
-        questionCount++;
-      }
-    }
-
-    return questionCount + Math.floor(greetingCount / 3);
+    return count;
   }
-
-
   async handleChat(request: FastifyRequest, reply: FastifyReply) {
     try {
       const parsed = ChatRequestSchema.safeParse(request.body);
@@ -57,6 +44,7 @@ export class KiAiController {
       const {
         message,
         session_id,
+        agent,
         user_id,
         userId,
         user_name,
@@ -68,11 +56,32 @@ export class KiAiController {
       const final_user_id = user_id || userId;
       const final_user_name = user_name || userName;
       const final_user_email = user_email || userEmail;
+      const final_agent = agent || 'general';
+
+      // Ensure session exists or create it
+      let session = await prisma.chatSession.findUnique({ where: { id: session_id } });
+      if (!session) {
+        session = await prisma.chatSession.create({
+          data: {
+            id: session_id,
+            userId: final_user_id || null,
+            channel: 'web',
+            activeAgent: final_agent
+          }
+        });
+      } else if (session.activeAgent !== final_agent) {
+        session = await prisma.chatSession.update({
+          where: { id: session_id },
+          data: { activeAgent: final_agent }
+        });
+      }
 
       // FORCED LOGGING: Create initial log for audit
       const initialLog = await prisma.chatLog.create({
         data: {
-          sessionId: session_id,
+          sessionId: session.id,
+          channel: 'web',
+          agent: final_agent,
           userId: final_user_id || null,
           userName: final_user_name || null,
           userEmail: final_user_email || null,
@@ -103,26 +112,8 @@ export class KiAiController {
         }
       }
 
-      // 1. Get History (Exclude the current pending log)
-      const historyLogs = await prisma.chatLog.findMany({
-        where: { 
-          sessionId: session_id,
-          id: { not: initialLog.id }
-        },
-        orderBy: { createdAt: 'desc' },
-        take: 3,
-      });
-
-      const history = historyLogs.reverse().map(h => ({
-        question: h.question,
-        answer: h.answer
-      }));
-
-      // 2. Refine Question (Context awareness)
-      const refinedMessage = await refinementEngine.refineQuestion(message, history);
-
-      // 3. Content Moderation (Use refined message for better accuracy on follow-ups)
-      const category = await moderationEngine.classifyMessage(refinedMessage);
+      // 1. Content Moderation
+      const category = await moderationEngine.classifyMessage(message);
 
       if (category === 'BAD') {
         const blockText = "Pertanyaan Anda mengandung konten yang tidak pantas, menyinggung, atau melanggar pedoman kami. Demi menjaga kesantunan dan kehormatan majelis ilmu ini, akun Anda telah kami BLOKIR PERMANEN. Harap gunakan bahasa yang baik dan sopan di lain kesempatan.";
@@ -237,83 +228,69 @@ export class KiAiController {
         }
       }
 
-      // 1. Search internal knowledge (Use refined message)
-      const internalResults = await knowledgeEngine.search(refinedMessage, 5);
+      // Use Agent Router
+      const agentInput: AgentRouteInput = {
+        message,
+        agent: final_agent as any,
+        channel: 'web',
+        sessionId: session_id,
+        userId: final_user_id,
+        userName: final_user_name,
+        userEmail: final_user_email
+      };
 
-      // 2. Decide Mode
-      const decision = decisionEngine.decideMode(internalResults);
-      const { mode, confidence } = decision;
-
-      // 3. Search external if needed
-      let externalResults: ExternalKnowledgeResult[] = [];
-      if (mode === 'hybrid' || mode === 'external') {
-        externalResults = await externalEngine.search(refinedMessage, 3);
-      }
-
-      // 4. Build Sources Data for response
-      const sources = [
-        ...internalResults.map(r => ({ type: 'internal', title: r.title, url: r.sourceUrl || null })),
-        ...externalResults.map(r => ({ type: r.sourceType, title: r.title, url: r.url }))
-      ];
-
-      // Update log with finalized mode
-      await prisma.chatLog.update({
-        where: { id: initialLog.id },
-        data: { mode, confidence }
-      });
-
-      // Insert Sources
-      if (sources.length > 0) {
-        await prisma.chatSource.createMany({
-          data: sources.map(s => ({
-            chatId: initialLog.id,
-            sourceType: s.type,
-            sourceUrl: s.url,
-            title: s.title || null,
-          })),
-        });
-      }
-
-      // 5. Call LLM (Pass history for conversational context)
-      const stream = await llmEngine.buildAndStreamPrompt(message, mode, internalResults, externalResults, false, history);
+      const stream = agentRouter.streamQuestion(agentInput);
 
       reply.raw.setHeader('Content-Type', 'text/event-stream');
       reply.raw.setHeader('Cache-Control', 'no-cache');
       reply.raw.setHeader('Connection', 'keep-alive');
 
       let fullAnswer = '';
+      let metadataReceived: any = null;
+
       for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content || '';
-        if (content) {
+        if (chunk.type === 'metadata') {
+          metadataReceived = chunk.data;
+          
+          await prisma.chatLog.update({
+            where: { id: initialLog.id },
+            data: { mode: metadataReceived.mode, confidence: metadataReceived.confidence }
+          });
+          
+          if (metadataReceived.sources && metadataReceived.sources.length > 0) {
+            await prisma.chatSource.createMany({
+              data: metadataReceived.sources.map((s: any) => ({
+                chatId: initialLog.id,
+                sourceType: s.type,
+                sourceUrl: s.url || null,
+                title: s.title || null,
+                author: s.author || null,
+                chapter: s.chapter || null,
+                page: s.page || null,
+                volume: s.volume || null,
+                excerpt: s.excerpt || null,
+                referenceId: s.referenceId || null,
+              })),
+            });
+          }
+        } else if (chunk.type === 'chunk') {
+          const content = chunk.data;
           fullAnswer += content;
           reply.raw.write(`data: ${JSON.stringify({ text: content })}\n\n`);
         }
       }
 
-      // 6. Check for Donation Appeal (Randomly shown starting from the 2nd question)
-      const dailyCount = final_user_id ? await this.calculateUsedQuota(final_user_id) : 0;
-      const currentDailyCount = dailyCount + 1;
-      const currentSessionCount = (history?.length || 0) + 1;
-
-      const shouldShowDonation =
-        (currentDailyCount >= 2 && currentDailyCount <= 4) ||
-        (currentSessionCount >= 2 && currentSessionCount <= 4) ||
-        (currentDailyCount >= 2 && Math.random() < 0.7);
-
-      const donationAppeal = shouldShowDonation ? 
-        'Mari ikut mendukung perkembangan da\'wah digital KI.AI agar layanan ini terus hadir membantu umat mendapatkan akses ilmu dan jawaban keislaman yang mudah dipahami. Salurkan infaq terbaik Anda melalui tautan berikut: https://amanahzakat.id/program/27. Terima kasih.' 
-        : null;
-
       // Metadata at the end
-      reply.raw.write(`data: ${JSON.stringify({
-        metadata: {
-          mode,
-          sources,
-          confidence,
-          chat_id: initialLog.id,
-          donationAppeal
-        }
-      })}\n\n`);
+      if (metadataReceived) {
+        reply.raw.write(`data: ${JSON.stringify({
+          metadata: {
+            mode: metadataReceived.mode,
+            sources: metadataReceived.sources,
+            confidence: metadataReceived.confidence,
+            chat_id: initialLog.id
+          }
+        })}\n\n`);
+      }
 
       reply.raw.write('data: [DONE]\n\n');
       reply.raw.end();
@@ -321,7 +298,7 @@ export class KiAiController {
       // Final db update
       await prisma.chatLog.update({
         where: { id: initialLog.id },
-        data: { answer: fullAnswer, donationAppeal }
+        data: { answer: fullAnswer }
       });
 
     } catch (error: any) {
@@ -345,28 +322,17 @@ export class KiAiController {
 
       const dailyCount = await this.calculateUsedQuota(final_user_id);
 
-      // Raw query to get unique sessions with their FIRST question but ordered by LATEST activity
-      const sessions = await prisma.$queryRaw`
-        SELECT DISTINCT ON ("sessionId") 
-          "sessionId", 
-          "question", 
-          "createdAt",
-          MAX("createdAt") OVER (PARTITION BY "sessionId") as "lastActivity"
-        FROM "chat_logs"
-        WHERE "userId" = ${final_user_id}
-        ORDER BY "sessionId", "createdAt" ASC
-      ` as any[];
-
-      // Sort by lastActivity desc in JS
-      const sortedSessions = sessions
-        .sort((a, b) => new Date(b.lastActivity).getTime() - new Date(a.lastActivity).getTime())
-        .slice(0, 15);
-
-      const logs = sortedSessions.map(s => ({
-        sessionId: s.sessionId,
-        question: s.question,
-        createdAt: s.createdAt
-      }));
+      const logs = await prisma.chatLog.findMany({
+        where: { userId: final_user_id },
+        orderBy: { createdAt: 'desc' },
+        distinct: ['sessionId'],
+        select: {
+          sessionId: true,
+          question: true,
+          createdAt: true
+        },
+        take: 10
+      });
 
       const isBlocked = await prisma.blockedKiAiUser.findUnique({
         where: { userId: final_user_id }

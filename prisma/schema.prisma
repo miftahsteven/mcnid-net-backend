@@ -151,6 +151,7 @@ model ChatLog {
   userEmail String?
   question  String
   answer    String
+  language   String?
   intent    String?
   ipHash    String?
   tokens    Int?
