@@ -168,12 +168,19 @@ model ChatLog {
 }
 
 model ChatSource {
-  id         String   @id @default(cuid())
-  chatId     String
-  sourceType String
-  sourceUrl  String?
-  title      String?
-  chat       ChatLog  @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  id          String   @id @default(cuid())
+  chatId      String
+  sourceType  String
+  sourceUrl   String?
+  title       String?
+  author      String?
+  chapter     String?
+  page        Int?
+  volume      Int?
+  excerpt     String?
+  referenceId String?
+  metadata    Json?
+  chat        ChatLog  @relation(fields: [chatId], references: [id], onDelete: Cascade)
 
   @@map("chat_sources")
 }
