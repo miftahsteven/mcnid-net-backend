@@ -117,24 +117,64 @@ export async function postsRoutes(fastify: FastifyInstance) {
     }
   });
 
+  // Helper to ensure unique slug across posts
+  async function generateUniqueSlug(requestedSlug: string, currentId?: string): Promise<string> {
+    const cleanSlug = requestedSlug
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9-]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '') || `post-${Date.now()}`;
+
+    let candidate = cleanSlug;
+    let counter = 1;
+
+    while (true) {
+      const existing = await prisma.post.findUnique({
+        where: { slug: candidate },
+        select: { id: true },
+      });
+
+      if (!existing || (currentId && existing.id === currentId)) {
+        return candidate;
+      }
+
+      counter++;
+      candidate = `${cleanSlug}-${counter}`;
+    }
+  }
+
   // POST create (admin/editor only)
   fastify.post('/', {
     preHandler: [authMiddleware, requireRole('ADMIN', 'EDITOR', 'SUPER_ADMIN')],
     handler: async (request: FastifyRequest, reply: FastifyReply) => {
       try {
         const body = CreatePostSchema.parse(request.body);
-        const { categoryId, categoryIds, tags, tagIds, content, publishedAt, ...rest } = body;
+        const { categoryId, categoryIds, tags, tagIds, content, publishedAt, slug, ...rest } = body;
 
         const cats = categoryIds || (categoryId ? [categoryId] : []);
+
+        // Filter valid categories to prevent foreign key errors
+        let validCats: string[] = [];
+        if (cats.length > 0) {
+          const found = await prisma.category.findMany({
+            where: { id: { in: cats } },
+            select: { id: true },
+          });
+          validCats = found.map((c) => c.id);
+        }
+
+        const finalSlug = await generateUniqueSlug(slug || rest.title || `post-${Date.now()}`);
 
         const post = await prisma.post.create({
           data: {
             ...rest,
+            slug: finalSlug,
             content: sanitizeRichText(content),
             authorId: (request as any).user.sub,
             publishedAt: publishedAt || (rest.status === 'PUBLISHED' ? new Date() : null),
-            categories: cats.length > 0 ? {
-              create: cats.map((id) => ({ categoryId: id })),
+            categories: validCats.length > 0 ? {
+              create: validCats.map((id) => ({ categoryId: id })),
             } : undefined,
             tags: tags && tags.length > 0 ? {
               create: tags.map((t) => ({
@@ -151,9 +191,16 @@ export async function postsRoutes(fastify: FastifyInstance) {
           },
         });
         return reply.status(201).send({ data: post });
-      } catch (err) {
+      } catch (err: any) {
         if (err instanceof ZodError) return reply.status(400).send({ error: err.errors });
-        throw err;
+        if (err?.code === 'P2002') {
+          return reply.status(409).send({ error: 'Slug atau judul artikel sudah digunakan oleh artikel lain.' });
+        }
+        if (err?.code === 'P2003') {
+          return reply.status(400).send({ error: 'Relasi kategori atau tag tidak valid.' });
+        }
+        request.log.error(err, 'Create post error');
+        return reply.status(500).send({ error: err.message || 'Internal Server Error' });
       }
     },
   });
@@ -164,21 +211,36 @@ export async function postsRoutes(fastify: FastifyInstance) {
     handler: async (request: FastifyRequest<{ Params: { id: string } }>, reply: FastifyReply) => {
       try {
         const body = UpdatePostSchema.parse(request.body);
-        const { categoryId, categoryIds, tags, tagIds, content, publishedAt, ...rest } = body;
+        const { categoryId, categoryIds, tags, tagIds, content, publishedAt, slug, ...rest } = body;
 
         const cats = categoryIds || (categoryId ? [categoryId] : undefined);
         const hasCatsUpdate = cats !== undefined;
+
+        let validCats: string[] = [];
+        if (hasCatsUpdate && cats.length > 0) {
+          const found = await prisma.category.findMany({
+            where: { id: { in: cats } },
+            select: { id: true },
+          });
+          validCats = found.map((c) => c.id);
+        }
+
+        let finalSlug: string | undefined = undefined;
+        if (slug) {
+          finalSlug = await generateUniqueSlug(slug, request.params.id);
+        }
 
         const post = await prisma.post.update({
           where: { id: request.params.id },
           data: {
             ...rest,
+            ...(finalSlug ? { slug: finalSlug } : {}),
             ...(content && { content: sanitizeRichText(content) }),
             ...(publishedAt ? { publishedAt } : (rest.status === 'PUBLISHED' ? { publishedAt: new Date() } : {})),
             ...(hasCatsUpdate ? {
               categories: {
                 deleteMany: {},
-                create: cats.map((id) => ({ categoryId: id }))
+                create: validCats.map((id) => ({ categoryId: id }))
               }
             } : {}),
             ...(tags && tags.length > 0 ? {
@@ -197,9 +259,16 @@ export async function postsRoutes(fastify: FastifyInstance) {
           },
         });
         return reply.send({ data: post });
-      } catch (err) {
+      } catch (err: any) {
         if (err instanceof ZodError) return reply.status(400).send({ error: err.errors });
-        throw err;
+        if (err?.code === 'P2002') {
+          return reply.status(409).send({ error: 'Slug sudah digunakan oleh artikel lain.' });
+        }
+        if (err?.code === 'P2003') {
+          return reply.status(400).send({ error: 'Relasi kategori atau tag tidak valid.' });
+        }
+        request.log.error(err, 'Update post error');
+        return reply.status(500).send({ error: err.message || 'Internal Server Error' });
       }
     },
   });
