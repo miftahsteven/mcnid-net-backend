@@ -166,6 +166,14 @@ const config = {
         "fromEnvVar": null,
         "value": "darwin-arm64",
         "native": true
+      },
+      {
+        "fromEnvVar": null,
+        "value": "debian-openssl-1.1.x"
+      },
+      {
+        "fromEnvVar": null,
+        "value": "debian-openssl-3.0.x"
       }
     ],
     "previewFeatures": [],
@@ -173,7 +181,7 @@ const config = {
     "isCustomOutput": true
   },
   "relativeEnvPaths": {
-    "rootEnvPath": "../../../.env",
+    "rootEnvPath": null,
     "schemaEnvPath": "../../../.env"
   },
   "relativePath": "../..",
@@ -192,8 +200,8 @@ const config = {
       }
     }
   },
-  "inlineSchema": "generator client {\n  provider = \"prisma-client-js\"\n  output   = \"./generated/maktabah\"\n}\n\ndatasource db {\n  provider = \"postgresql\"\n  url      = env(\"DATABASE_URL_MAKTABAH\")\n}\n\nmodel MaktabahBook {\n  id        Int       @id\n  title     String\n  titleAr   String?\n  author    String?\n  authorAr  String?\n  category  String?\n  source    String?\n  createdAt DateTime?\n  updatedAt DateTime?\n\n  chapters MaktabahChapter[]\n  contents MaktabahContent[]\n\n  @@map(\"maktabah_books\")\n}\n\nmodel MaktabahChapter {\n  id      Int     @id\n  bookId  Int\n  title   String\n  titleAr String?\n  orderNo Int?\n\n  book     MaktabahBook      @relation(fields: [bookId], references: [id])\n  contents MaktabahContent[]\n\n  @@map(\"maktabah_chapters\")\n}\n\nmodel MaktabahContent {\n  id          Int     @id\n  bookId      Int\n  chapterId   Int?\n  page        Int?\n  volume      Int?\n  contentAr   String\n  contentText String?\n  normalized  String?\n  searchText  String?\n\n  book    MaktabahBook     @relation(fields: [bookId], references: [id])\n  chapter MaktabahChapter? @relation(fields: [chapterId], references: [id])\n\n  @@map(\"maktabah_contents\")\n}\n",
-  "inlineSchemaHash": "faa9c2719a4b1272aef045f441892419909cac35c3bb6bc3985e09660be26a86",
+  "inlineSchema": "generator client {\n  provider      = \"prisma-client-js\"\n  output        = \"./generated/maktabah\"\n  binaryTargets = [\"native\", \"debian-openssl-1.1.x\", \"debian-openssl-3.0.x\"]\n}\n\ndatasource db {\n  provider = \"postgresql\"\n  url      = env(\"DATABASE_URL_MAKTABAH\")\n}\n\nmodel MaktabahBook {\n  id        Int       @id\n  title     String\n  titleAr   String?\n  author    String?\n  authorAr  String?\n  category  String?\n  source    String?\n  createdAt DateTime?\n  updatedAt DateTime?\n\n  chapters MaktabahChapter[]\n  contents MaktabahContent[]\n\n  @@map(\"maktabah_books\")\n}\n\nmodel MaktabahChapter {\n  id      Int     @id\n  bookId  Int\n  title   String\n  titleAr String?\n  orderNo Int?\n\n  book     MaktabahBook      @relation(fields: [bookId], references: [id])\n  contents MaktabahContent[]\n\n  @@map(\"maktabah_chapters\")\n}\n\nmodel MaktabahContent {\n  id          Int     @id\n  bookId      Int\n  chapterId   Int?\n  page        Int?\n  volume      Int?\n  contentAr   String\n  contentText String?\n  normalized  String?\n  searchText  String?\n\n  book    MaktabahBook     @relation(fields: [bookId], references: [id])\n  chapter MaktabahChapter? @relation(fields: [chapterId], references: [id])\n\n  @@map(\"maktabah_contents\")\n}\n",
+  "inlineSchemaHash": "847b229b217f3d8f383e9ad58336579454c4cd616b6a85562a11fc72ae90e971",
   "copyEngine": true
 }
 
@@ -233,6 +241,14 @@ Object.assign(exports, Prisma)
 // file annotations for bundling tools to include these files
 path.join(__dirname, "libquery_engine-darwin-arm64.dylib.node");
 path.join(process.cwd(), "prisma/generated/maktabah/libquery_engine-darwin-arm64.dylib.node")
+
+// file annotations for bundling tools to include these files
+path.join(__dirname, "libquery_engine-debian-openssl-1.1.x.so.node");
+path.join(process.cwd(), "prisma/generated/maktabah/libquery_engine-debian-openssl-1.1.x.so.node")
+
+// file annotations for bundling tools to include these files
+path.join(__dirname, "libquery_engine-debian-openssl-3.0.x.so.node");
+path.join(process.cwd(), "prisma/generated/maktabah/libquery_engine-debian-openssl-3.0.x.so.node")
 // file annotations for bundling tools to include these files
 path.join(__dirname, "schema.prisma");
 path.join(process.cwd(), "prisma/generated/maktabah/schema.prisma")
